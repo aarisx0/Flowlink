@@ -145,6 +145,10 @@ wss.on('connection', (ws, req) => {
           handleMediaHandoff(ws, message);
           break;
           
+        case 'device_connected_notification':
+          handleDeviceConnectedNotification(ws, message);
+          break;
+          
         case 'clipboard_broadcast':
           handleClipboardBroadcast(ws, message);
           break;
@@ -932,6 +936,46 @@ function handleIntentSend(ws, message) {
     payload: { targetDevice },
     timestamp: Date.now()
   }));
+}
+
+/**
+ * Handle device connected notification (notify other devices)
+ */
+function handleDeviceConnectedNotification(ws, message) {
+  const { deviceId } = message;
+  const { deviceName, deviceType, username } = message.payload;
+
+  console.log(`handleDeviceConnectedNotification: ${deviceName} (${deviceType}) connected for user ${username}`);
+
+  // Broadcast to all other devices with same username
+  const senderDevice = globalDevices.get(deviceId);
+  if (senderDevice && senderDevice.device.username) {
+    const notifyUsername = senderDevice.device.username;
+    console.log(`Notifying all devices with username: ${notifyUsername}`);
+
+    for (const [targetDeviceId, deviceEntry] of globalDevices.entries()) {
+      if (targetDeviceId === deviceId) continue; // Skip sender
+      if (deviceEntry.device.username !== notifyUsername) continue; // Only same username
+
+      // Send to all connections of this device
+      for (const targetWs of deviceEntry.connections) {
+        if (targetWs.readyState === targetWs.OPEN) {
+          targetWs.send(JSON.stringify({
+            type: 'device_connected',
+            sessionId: null,
+            deviceId: targetDeviceId,
+            payload: {
+              deviceName,
+              deviceType,
+              username: notifyUsername
+            },
+            timestamp: Date.now()
+          }));
+          console.log(`Device connected notification sent to device ${targetDeviceId}`);
+        }
+      }
+    }
+  }
 }
 
 /**

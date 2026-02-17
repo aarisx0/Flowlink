@@ -70,7 +70,7 @@ class WebSocketManager(private val mainActivity: MainActivity) {
     // IMPORTANT: Railway production backend
     // For Railway production: "wss://flowlink-production.up.railway.app"
     // For local development: "ws://10.0.2.2:8080" (emulator) or "ws://YOUR_COMPUTER_IP:8080" (physical device)
-    private val WS_URL = "wss://flowlink-production.up.railway.app"
+    private val WS_URL = "wss://sparkling-courtesy-production-1cb0.up.railway.app"
 
     fun connect(sessionCode: String) {
         try {
@@ -414,6 +414,23 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                         }
                     }
                 }
+                "media_handoff_offer" -> {
+                    Log.d("FlowLink", "🎬 Received media handoff offer")
+                    val payload = json.getJSONObject("payload")
+                    val title = payload.optString("title", "Unknown Video")
+                    val url = payload.optString("url", "")
+                    val timestamp = payload.optInt("timestamp", 0)
+                    val platform = payload.optString("platform", "Unknown")
+                    
+                    Log.d("FlowLink", "Media: $title from $platform at ${timestamp}s")
+                    
+                    // Show notification
+                    try {
+                        mainActivity.notificationService.showMediaHandoff(title, url, timestamp, platform)
+                    } catch (e: Exception) {
+                        Log.e("FlowLink", "Failed to show media handoff notification", e)
+                    }
+                }
                 "session_invitation" -> {
                     Log.d("FlowLink", "📨 Received session invitation")
                     val invitation = json.getJSONObject("payload").optJSONObject("invitation")
@@ -452,6 +469,22 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                         } catch (e: Exception) {
                             Log.e("FlowLink", "Failed to show nearby session notification", e)
                         }
+                    }
+                }
+                "device_connected" -> {
+                    Log.d("FlowLink", "📱 Device connected notification received")
+                    val payload = json.getJSONObject("payload")
+                    val deviceName = payload.optString("deviceName", "Unknown Device")
+                    val deviceType = payload.optString("deviceType", "device")
+                    val username = payload.optString("username", "")
+                    
+                    Log.d("FlowLink", "Device: $deviceName ($deviceType) - User: $username")
+                    
+                    // Show notification
+                    try {
+                        mainActivity.notificationService.showDeviceConnected(deviceName, deviceType)
+                    } catch (e: Exception) {
+                        Log.e("FlowLink", "Failed to show device connected notification", e)
                     }
                 }
                 "invitation_response" -> {

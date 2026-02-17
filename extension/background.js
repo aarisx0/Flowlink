@@ -4,7 +4,7 @@
  */
 
 // Configuration
-const BACKEND_URL = 'ws://localhost:8080'; // Change to production URL: wss://your-app.railway.app
+const BACKEND_URL = 'wss://sparkling-courtesy-production-1cb0.up.railway.app'; // Railway production (secure WebSocket)
 let ws = null;
 let deviceId = null;
 let username = null;
@@ -19,14 +19,24 @@ chrome.runtime.onInstalled.addListener(() => {
   
   // Load saved settings
   chrome.storage.local.get(['deviceId', 'username', 'settings'], (result) => {
-    if (result.deviceId && result.username) {
+    console.log('Loaded from storage:', result);
+    
+    // ALWAYS ensure deviceId exists
+    if (result.deviceId) {
       deviceId = result.deviceId;
-      username = result.username;
-      connectWebSocket();
+      console.log('Using existing deviceId:', deviceId);
     } else {
-      // Generate device ID if not exists
       deviceId = generateDeviceId();
       chrome.storage.local.set({ deviceId });
+      console.log('Generated new deviceId:', deviceId);
+    }
+    
+    if (result.username) {
+      username = result.username;
+      console.log('Found existing user:', username);
+      connectWebSocket();
+    } else {
+      console.log('⚠️ No username found. Please set username in popup.');
     }
     
     // Set default settings
@@ -38,6 +48,27 @@ chrome.runtime.onInstalled.addListener(() => {
           notifications: true
         }
       });
+      console.log('Set default settings');
+    }
+  });
+});
+
+// Also connect on startup (when browser starts)
+chrome.runtime.onStartup.addListener(() => {
+  console.log('Browser started, checking for saved username...');
+  chrome.storage.local.get(['deviceId', 'username'], (result) => {
+    // ALWAYS ensure deviceId exists
+    if (result.deviceId) {
+      deviceId = result.deviceId;
+    } else {
+      deviceId = generateDeviceId();
+      chrome.storage.local.set({ deviceId });
+    }
+    
+    if (result.username) {
+      username = result.username;
+      console.log('Reconnecting with username:', username);
+      connectWebSocket();
     }
   });
 });
@@ -63,23 +94,25 @@ function connectWebSocket() {
   try {
     ws = new WebSocket(BACKEND_URL);
     
-    // Set connection timeout
+    // Set connection timeout (30 seconds for Railway cold start)
     connectionTimeout = setTimeout(() => {
       if (ws && ws.readyState !== WebSocket.OPEN) {
-        console.error('Connection timeout - backend not responding');
+        console.error('⏱️ Connection timeout - backend not responding');
         ws.close();
       }
-    }, 10000); // 10 second timeout
+    }, 30000); // 30 second timeout for Railway
 
     ws.onopen = () => {
       clearTimeout(connectionTimeout);
       console.log('✅ Connected to FlowLink backend');
+      console.log('📝 Username:', username);
+      console.log('🆔 Device ID:', deviceId);
       isConnected = true;
       reconnectAttempts = 0;
       
       // Register device
       if (username) {
-        sendMessage({
+        const registerMsg = {
           type: 'device_register',
           payload: {
             deviceId,
@@ -87,11 +120,19 @@ function connectWebSocket() {
             deviceType: 'browser',
             username
           }
-        });
+        };
+        console.log('📤 Sending registration:', registerMsg);
+        sendMessage(registerMsg);
+      } else {
+        console.warn('⚠️ No username set! Please open extension popup and set username.');
       }
       
       // Update popup
-      chrome.runtime.sendMessage({ type: 'connection_status', connected: true }).catch(() => {});
+      try {
+        chrome.runtime.sendMessage({ type: 'connection_status', connected: true });
+      } catch (e) {
+        // Popup might not be open
+      }
     };
 
     ws.onmessage = (event) => {
@@ -101,32 +142,35 @@ function connectWebSocket() {
 
     ws.onclose = (event) => {
       clearTimeout(connectionTimeout);
-      console.log('❌ Disconnected from FlowLink backend. Code:', event.code, 'Reason:', event.reason);
+      console.log('❌ Disconnected from FlowLink backend');
+      console.log('   Close code:', event.code);
+      console.log('   Close reason:', event.reason || 'No reason provided');
       isConnected = false;
       ws = null;
       
       // Update popup
-      chrome.runtime.sendMessage({ type: 'connection_status', connected: false }).catch(() => {});
+      try {
+        chrome.runtime.sendMessage({ type: 'connection_status', connected: false });
+      } catch (e) {
+        // Popup might not be open
+      }
       
-      // Attempt reconnection
+      // Attempt reconnection with exponential backoff
       if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
         reconnectAttempts++;
-        const delay = 2000 * reconnectAttempts;
-        console.log(`Reconnecting in ${delay/1000} seconds... (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+        const delay = Math.min(2000 * Math.pow(2, reconnectAttempts - 1), 30000); // Max 30s
+        console.log(`🔄 Reconnecting in ${delay/1000}s... (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
         setTimeout(connectWebSocket, delay);
       } else {
-        console.error('❌ Max reconnection attempts reached. Please check backend URL and try reloading extension.');
+        console.error('❌ Max reconnection attempts reached.');
+        console.error('   Please reload the extension or check backend status.');
       }
     };
 
     ws.onerror = (error) => {
       console.error('❌ WebSocket error:', error);
-      console.error('Backend URL:', BACKEND_URL);
-      console.error('Make sure:');
-      console.error('1. Backend server is running');
-      console.error('2. Backend URL is correct in background.js');
-      console.error('3. For Railway: Use wss://your-app.railway.app');
-      console.error('4. For local: Use ws://localhost:8080');
+      console.error('   Backend URL:', BACKEND_URL);
+      console.error('   Make sure Railway backend is running!');
     };
   } catch (error) {
     console.error('❌ Failed to create WebSocket:', error);
@@ -137,34 +181,86 @@ function connectWebSocket() {
 function sendMessage(message) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     message.timestamp = Date.now();
-    message.deviceId = deviceId;
-    ws.send(JSON.stringify(message));
+    message.deviceId = deviceId; // Always set deviceId
+    
+    // Ensure deviceId is not null
+    if (!message.deviceId) {
+      console.error('❌ Cannot send message: deviceId is null!');
+      console.error('   Regenerating deviceId...');
+      deviceId = generateDeviceId();
+      chrome.storage.local.set({ deviceId });
+      message.deviceId = deviceId;
+    }
+    
+    const msgStr = JSON.stringify(message);
+    console.log('📤 Sending to backend:', message.type, message);
+    ws.send(msgStr);
   } else {
-    console.error('WebSocket not connected');
+    console.error('❌ WebSocket not connected. Cannot send:', message.type);
+    console.error('   Connection state:', ws ? ws.readyState : 'null');
+    console.error('   Username:', username);
+    console.error('   Device ID:', deviceId);
   }
 }
 
 // Handle incoming messages
 function handleMessage(message) {
-  console.log('Received message:', message.type);
+  console.log('📥 Received from backend:', message.type, message);
   
   switch (message.type) {
     case 'device_registered':
-      console.log('Device registered successfully');
+      console.log('✅ Device registered successfully!');
+      console.log('   Username:', username);
+      console.log('   Device ID:', deviceId);
+      console.log('   Ready to send/receive notifications!');
+      
+      // Wait 2 seconds to ensure other devices are also registered
+      setTimeout(() => {
+        console.log('📤 Sending device connected notification to other devices...');
+        sendMessage({
+          type: 'device_connected_notification',
+          payload: {
+            deviceName: 'Browser Extension',
+            deviceType: 'browser',
+            username: username
+          }
+        });
+      }, 2000);
       break;
       
     case 'media_handoff_offer':
+      console.log('🎬 Media handoff offer received:', message.payload);
       handleMediaHandoffOffer(message.payload);
       break;
       
     case 'clipboard_sync':
+      console.log('📋 Clipboard sync received:', message.payload);
       handleClipboardSync(message.payload);
       break;
       
     case 'session_invitation':
-      // Forward to popup if open
-      chrome.runtime.sendMessage({ type: 'session_invitation', data: message.payload });
+      console.log('📨 Session invitation received:', message.payload);
+      // Forward to popup if open (safely)
+      try {
+        chrome.runtime.sendMessage({ type: 'session_invitation', data: message.payload });
+      } catch (e) {
+        // Popup not open, ignore
+      }
       break;
+      
+    case 'pong':
+      // Keepalive response - no action needed
+      break;
+      
+    case 'error':
+      console.error('❌ Backend error:', message.payload);
+      if (message.payload && message.payload.message) {
+        console.error('   Error message:', message.payload.message);
+      }
+      break;
+      
+    default:
+      console.log('❓ Unknown message type:', message.type);
   }
 }
 
@@ -252,18 +348,20 @@ function handleClipboardSync(payload) {
 
 // Listen for messages from content scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  // Handle messages synchronously - no async responses needed
+  
   switch (request.type) {
     case 'media_state_changed':
       handleMediaStateChanged(request.data, sender.tab);
-      break;
+      return false; // Synchronous
       
     case 'clipboard_changed':
       handleClipboardChanged(request.data);
-      break;
+      return false; // Synchronous
       
     case 'get_connection_status':
       sendResponse({ connected: isConnected, username });
-      break;
+      return false; // Synchronous
       
     case 'set_username':
       username = request.username;
@@ -283,31 +381,39 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         connectWebSocket();
       }
       sendResponse({ success: true });
-      break;
+      return false; // Synchronous
       
     case 'disconnect':
       if (ws) {
         ws.close();
       }
       sendResponse({ success: true });
-      break;
+      return false; // Synchronous
   }
   
-  return true; // Keep channel open for async response
+  return false; // Don't keep channel open
 });
 
 // Handle media state changes from content scripts
 function handleMediaStateChanged(data, tab) {
+  console.log('🎬 Media state changed:', data);
+  
   chrome.storage.local.get(['settings'], (result) => {
-    if (!result.settings?.smartHandoff) return;
+    if (!result.settings?.smartHandoff) {
+      console.log('⚠️ Smart Handoff is disabled in settings');
+      return;
+    }
     
     const { state, title, url, timestamp, platform } = data;
     
     if (state === 'paused') {
-      console.log('Media paused:', title);
+      console.log('⏸️ Media paused:', title);
+      console.log('   Platform:', platform);
+      console.log('   Timestamp:', timestamp);
+      console.log('   URL:', url);
       
       // Send to backend
-      sendMessage({
+      const msg = {
         type: 'media_handoff',
         payload: {
           action: 'paused',
@@ -317,17 +423,24 @@ function handleMediaStateChanged(data, tab) {
           platform,
           tabId: tab.id
         }
-      });
+      };
+      console.log('📤 Sending media handoff to backend...');
+      sendMessage(msg);
     }
   });
 }
 
 // Handle clipboard changes from content scripts
 function handleClipboardChanged(data) {
+  console.log('📋 Clipboard changed:', data.text?.substring(0, 50));
+  
   chrome.storage.local.get(['settings'], (result) => {
-    if (!result.settings?.universalClipboard) return;
+    if (!result.settings?.universalClipboard) {
+      console.log('⚠️ Universal Clipboard is disabled in settings');
+      return;
+    }
     
-    console.log('Clipboard changed:', data.text?.substring(0, 50));
+    console.log('📤 Sending clipboard to backend...');
     
     // Send to backend
     sendMessage({

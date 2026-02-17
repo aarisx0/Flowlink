@@ -1,0 +1,179 @@
+🚀 FLOWLINK EXTENSION - COMPLETE TESTING GUIDE
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚠️ IMPORTANT: MOBILE CANNOT CONNECT TO LOCALHOST!
+
+Your mobile phone and computer are on different devices.
+Mobile needs your computer's IP address, not "localhost"!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📋 STEP-BY-STEP SETUP:
+
+1️⃣ FIND YOUR COMPUTER'S IP ADDRESS:
+
+   Windows:
+   - Open Command Prompt
+   - Type: ipconfig
+   - Look for "IPv4 Address" under your WiFi/Ethernet
+   - Example: 192.168.1.100
+
+   Your IP: _________________ (write it down!)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+2️⃣ UPDATE MOBILE APP:
+
+   Open: mobile/android/app/src/main/java/com/flowlink/app/service/WebSocketManager.kt
+   
+   Find line with:
+   private val SIGNALING_URL = "ws://10.0.2.2:8080"
+   
+   Change to:
+   private val SIGNALING_URL = "ws://YOUR_IP:8080"
+   
+   Example:
+   private val SIGNALING_URL = "ws://192.168.1.100:8080"
+   
+   Then rebuild and install the app!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+3️⃣ MAKE SURE BACKEND IS RUNNING:
+
+   Backend is currently running on: localhost:8080
+   
+   Keep it running! Don't close the terminal.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+4️⃣ RELOAD BROWSER EXTENSION:
+
+   1. Go to: chrome://extensions/
+   2. Find FlowLink extension
+   3. Click reload button (circular arrow)
+   4. Click extension icon
+   5. Enter username: "Aaris"
+   6. Click "Get Started"
+   7. Should show "Connected" ✅
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+5️⃣ OPEN MOBILE APP:
+
+   1. Open FlowLink app
+   2. Enter SAME username: "Aaris"
+   3. Should show "Connected" ✅
+   4. Stay on home screen (don't join session)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+6️⃣ CHECK BACKEND CONSOLE:
+
+   You should see:
+   ✅ "WebSocket connection established"
+   ✅ "Device registered: Aaris (Browser Extension)"
+   ✅ "Device registered: Aaris (moto g64 5G)"
+   
+   If you see both devices, you're ready to test!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+7️⃣ TEST CLIPBOARD:
+
+   On Computer:
+   1. Select and copy text: "Hello from browser!"
+   2. Check extension console: Should see "📋 Clipboard copied"
+   3. Check backend console: Should see "clipboard_broadcast"
+   
+   On Mobile:
+   1. Open any app
+   2. Long press → Paste
+   3. Should see: "Hello from browser!" ✅
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+8️⃣ TEST MEDIA HANDOFF:
+
+   On Computer:
+   1. Open YouTube
+   2. Play any video
+   3. Let it play for 10 seconds
+   4. PAUSE the video
+   5. Check extension console: Should see "⏸️ Media paused"
+   6. Check backend console: Should see "media_handoff"
+   
+   On Mobile:
+   1. Should get notification: "Continue watching?"
+   2. Click "Continue"
+   3. YouTube should open at same timestamp ✅
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🐛 TROUBLESHOOTING:
+
+❌ Extension shows "Disconnected":
+   - Check backend is running
+   - Check extension console for errors
+   - Reload extension
+
+❌ Mobile shows "Disconnected":
+   - Check you updated IP address in WebSocketManager.kt
+   - Check mobile and computer on same WiFi
+   - Rebuild and reinstall app
+
+❌ No notifications on mobile:
+   - Check both devices have SAME username
+   - Check backend console shows both devices registered
+   - Check mobile app has notification permissions
+
+❌ "Extension context invalidated" error:
+   - This is normal after reloading extension
+   - Just refresh the YouTube page
+   - Error will go away
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 HOW TO CHECK IF IT'S WORKING:
+
+Extension Console (chrome://extensions/ → Inspect views):
+✅ "✅ Connected to FlowLink backend"
+✅ "📝 Username: Aaris"
+✅ "✅ Device registered successfully!"
+
+Backend Console:
+✅ Shows 2 WebSocket connections
+✅ Shows both devices registered with username "Aaris"
+
+Mobile App:
+✅ Shows "Connected" status
+✅ Shows username "Aaris" at top
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💡 KEY POINTS:
+
+1. Mobile CANNOT use "localhost" - needs your computer's IP
+2. Both devices must be on SAME WiFi network
+3. Both devices must have SAME username
+4. Backend must be running on computer
+5. No session needed - username-based sync!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎯 QUICK FIX CHECKLIST:
+
+□ Backend running on computer (port 8080)
+□ Found computer's IP address
+□ Updated mobile app with computer's IP
+□ Rebuilt and installed mobile app
+□ Extension reloaded in Chrome
+□ Extension shows "Connected"
+□ Mobile app shows "Connected"
+□ Both have SAME username
+□ Backend console shows 2 devices
+
+If all checked ✅ → IT WILL WORK!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

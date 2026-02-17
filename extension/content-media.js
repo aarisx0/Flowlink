@@ -3,7 +3,38 @@
  * Detects video/audio playback and sends state changes to background script
  */
 
-console.log('FlowLink media detection loaded');
+console.log('🎬 FlowLink media detection loaded on:', window.location.hostname);
+
+let currentVideo = null;
+let lastState = null;
+let checkInterval = null;
+let isExtensionValid = true;
+
+// Check if extension context is valid
+function checkExtensionContext() {
+  try {
+    chrome.runtime.id;
+    return true;
+  } catch (err) {
+    if (!isExtensionValid) return false;
+    isExtensionValid = false;
+    console.warn('⚠️ Extension reloaded. Please refresh this page.');
+    return false;
+  }
+}
+
+// Safe message sending
+function sendToBackground(message) {
+  if (!checkExtensionContext()) return;
+  
+  try {
+    chrome.runtime.sendMessage(message);
+  } catch (err) {
+    if (err.message.includes('context invalidated')) {
+      isExtensionValid = false;
+    }
+  }
+}
 
 let currentVideo = null;
 let lastState = null;
@@ -108,7 +139,7 @@ function monitorVideo(video) {
 
 // Send media state to background script
 function sendMediaState(state) {
-  if (!currentVideo) return;
+  if (!currentVideo || !checkExtensionContext()) return;
   
   const data = {
     state,
@@ -119,9 +150,9 @@ function sendMediaState(state) {
     platform: getPlatform()
   };
   
-  console.log('Sending media state:', data);
+  console.log('📤 Sending media state:', state, data.title);
   
-  chrome.runtime.sendMessage({
+  sendToBackground({
     type: 'media_state_changed',
     data
   });

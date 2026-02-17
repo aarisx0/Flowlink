@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>FlowLink Extension Diagnostics</title>
+  <style>
+    body {
+      font-family: monospace;
+      padding: 20px;
+      background: #1e1e1e;
+      color: #00ff00;
+    }
+    .section {
+      margin: 20px 0;
+      padding: 15px;
+      border: 1px solid #00ff00;
+      border-radius: 5px;
+    }
+    .success { color: #00ff00; }
+    .error { color: #ff0000; }
+    .warning { color: #ffaa00; }
+    .info { color: #00aaff; }
+    button {
+      background: #00ff00;
+      color: #000;
+      border: none;
+      padding: 10px 20px;
+      margin: 5px;
+      cursor: pointer;
+      font-family: monospace;
+      font-weight: bold;
+    }
+    button:hover {
+      background: #00cc00;
+    }
+    pre {
+      background: #000;
+      padding: 10px;
+      border-radius: 3px;
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>🔍 FlowLink Extension Diagnostics</h1>
+  
+  <div class="section">
+    <h2>📋 Instructions:</h2>
+    <ol>
+      <li>Open Chrome DevTools (F12)</li>
+      <li>Go to Console tab</li>
+      <li>Click the buttons below</li>
+      <li>Check console for detailed logs</li>
+    </ol>
+  </div>
+
+  <div class="section">
+    <h2>🧪 Tests:</h2>
+    <button onclick="checkExtension()">1. Check Extension Installed</button>
+    <button onclick="checkStorage()">2. Check Stored Username</button>
+    <button onclick="testClipboard()">3. Test Clipboard Copy</button>
+    <button onclick="openYouTube()">4. Open YouTube Test</button>
+    <button onclick="showInstructions()">5. Show Mobile Setup</button>
+  </div>
+
+  <div class="section">
+    <h2>📊 Results:</h2>
+    <pre id="results">Click buttons above to run tests...</pre>
+  </div>
+
+  <script>
+    function log(msg, type = 'info') {
+      const results = document.getElementById('results');
+      const colors = {
+        success: '#00ff00',
+        error: '#ff0000',
+        warning: '#ffaa00',
+        info: '#00aaff'
+      };
+      const line = `<span style="color: ${colors[type]}">${msg}</span>\n`;
+      results.innerHTML += line;
+      console.log(msg);
+    }
+
+    function clearResults() {
+      document.getElementById('results').innerHTML = '';
+    }
+
+    async function checkExtension() {
+      clearResults();
+      log('🔍 Checking if FlowLink extension is installed...', 'info');
+      
+      if (typeof chrome !== 'undefined' && chrome.runtime) {
+        log('✅ Chrome extension API available', 'success');
+        
+        try {
+          const response = await chrome.runtime.sendMessage({ type: 'get_connection_status' });
+          log('✅ Extension is responding!', 'success');
+          log(`   Connected: ${response.connected}`, response.connected ? 'success' : 'error');
+          log(`   Username: ${response.username || 'NOT SET'}`, response.username ? 'success' : 'warning');
+          
+          if (!response.username) {
+            log('⚠️ ACTION REQUIRED: Set username in extension popup!', 'warning');
+          }
+          
+          if (!response.connected) {
+            log('❌ Extension not connected to backend!', 'error');
+            log('   Check: Is backend running on localhost:8080?', 'warning');
+          }
+        } catch (err) {
+          log('❌ Extension not installed or not responding', 'error');
+          log(`   Error: ${err.message}`, 'error');
+        }
+      } else {
+        log('❌ Chrome extension API not available', 'error');
+        log('   This page must be opened in Chrome', 'error');
+      }
+    }
+
+    async function checkStorage() {
+      clearResults();
+      log('🔍 Checking extension storage...', 'info');
+      
+      try {
+        const data = await chrome.storage.local.get(['deviceId', 'username', 'settings']);
+        log('✅ Storage data retrieved:', 'success');
+        log(`   Device ID: ${data.deviceId || 'NOT SET'}`, data.deviceId ? 'success' : 'error');
+        log(`   Username: ${data.username || 'NOT SET'}`, data.username ? 'success' : 'error');
+        log(`   Settings:`, 'info');
+        log(`     Smart Handoff: ${data.settings?.smartHandoff ?? 'NOT SET'}`, 'info');
+        log(`     Universal Clipboard: ${data.settings?.universalClipboard ?? 'NOT SET'}`, 'info');
+        log(`     Notifications: ${data.settings?.notifications ?? 'NOT SET'}`, 'info');
+        
+        if (!data.username) {
+          log('', 'info');
+          log('⚠️ ACTION REQUIRED:', 'warning');
+          log('   1. Click FlowLink extension icon', 'warning');
+          log('   2. Enter your username', 'warning');
+          log('   3. Click "Get Started"', 'warning');
+        }
+      } catch (err) {
+        log('❌ Failed to read storage', 'error');
+        log(`   Error: ${err.message}`, 'error');
+      }
+    }
+
+    async function testClipboard() {
+      clearResults();
+      log('📋 Testing clipboard copy...', 'info');
+      
+      const testText = `FlowLink test - ${new Date().toLocaleTimeString()}`;
+      
+      try {
+        await navigator.clipboard.writeText(testText);
+        log('✅ Text copied to clipboard!', 'success');
+        log(`   Text: "${testText}"`, 'info');
+        log('', 'info');
+        log('📱 Now check your mobile device:', 'warning');
+        log('   1. Open any app', 'warning');
+        log('   2. Long press and select Paste', 'warning');
+        log('   3. You should see the same text!', 'warning');
+        
+        setTimeout(() => {
+          log('', 'info');
+          log('💡 If text did NOT appear on mobile:', 'error');
+          log('   1. Check mobile app has same username', 'error');
+          log('   2. Check mobile app is connected', 'error');
+          log('   3. Check extension console for errors', 'error');
+        }, 3000);
+      } catch (err) {
+        log('❌ Failed to copy to clipboard', 'error');
+        log(`   Error: ${err.message}`, 'error');
+      }
+    }
+
+    function openYouTube() {
+      clearResults();
+      log('🎬 Opening YouTube for media handoff test...', 'info');
+      log('', 'info');
+      log('📝 Instructions:', 'warning');
+      log('   1. Play any video', 'warning');
+      log('   2. Let it play for 10-20 seconds', 'warning');
+      log('   3. PAUSE the video', 'warning');
+      log('   4. Wait 2-3 seconds', 'warning');
+      log('   5. Check mobile for notification!', 'warning');
+      
+      setTimeout(() => {
+        window.open('https://www.youtube.com/watch?v=dQw4w9WgXcQ', '_blank');
+      }, 2000);
+    }
+
+    function showInstructions() {
+      clearResults();
+      log('📱 Mobile App Setup Instructions:', 'info');
+      log('', 'info');
+      log('1️⃣ Open FlowLink app on mobile', 'warning');
+      log('2️⃣ Set the SAME username as browser extension', 'warning');
+      log('3️⃣ Stay on home screen (no need to join session)', 'warning');
+      log('4️⃣ App should show "Connected"', 'warning');
+      log('', 'info');
+      log('🔍 How to verify same username:', 'info');
+      log('   Browser: Click extension icon → see username', 'info');
+      log('   Mobile: Open app → see username at top', 'info');
+      log('', 'info');
+      log('✅ If usernames match:', 'success');
+      log('   - Clipboard will sync automatically', 'success');
+      log('   - Media handoff will work', 'success');
+      log('   - No session needed!', 'success');
+    }
+
+    // Auto-run first check
+    window.onload = () => {
+      setTimeout(checkExtension, 500);
+    };
+  </script>
+</body>
+</html>

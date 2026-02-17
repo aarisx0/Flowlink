@@ -1,0 +1,219 @@
+🚀 FLOWLINK EXTENSION - FINAL TESTING STEPS
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚠️ CRITICAL: YOU MUST REFRESH PAGES AFTER RELOADING EXTENSION!
+
+The "Extension context invalidated" error happens because:
+- You reloaded the extension while YouTube was open
+- Old content scripts are still running
+- They can't communicate with the new extension
+
+SOLUTION: REFRESH ALL OPEN TABS (especially YouTube)!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📋 COMPLETE SETUP (DO THIS IN ORDER):
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 1: CLOSE ALL YOUTUBE TABS
+   - Close ALL tabs with YouTube, Netflix, Spotify
+   - This prevents context invalidation errors
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 2: RELOAD EXTENSION
+   1. Go to: chrome://extensions/
+   2. Find FlowLink extension
+   3. Click reload button (circular arrow)
+   4. Wait 2 seconds
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 3: CHECK EXTENSION CONSOLE
+   1. On chrome://extensions/ page
+   2. Find FlowLink extension
+   3. Click "Inspect views: background page"
+   4. Console should show:
+      ✅ "FlowLink background service worker loaded"
+      ✅ "Connecting to FlowLink backend: wss://..."
+      
+   5. If you see errors, reload extension again
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 4: SET USERNAME IN EXTENSION
+   1. Click FlowLink extension icon (in toolbar)
+   2. Enter username: "Aaris"
+   3. Click "Get Started"
+   4. Should show "Connected" with green dot
+   
+   5. Check background console again:
+      ✅ "✅ Connected to FlowLink backend"
+      ✅ "📝 Username: Aaris"
+      ✅ "✅ Device registered successfully!"
+      ✅ "📤 Sending to backend: device_connected_notification"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 5: CHECK MOBILE APP
+   1. Open FlowLink app on mobile
+   2. Make sure username is "Aaris" (SAME as extension)
+   3. Should show "Connected"
+   4. Should get notification: "🌐 Device Connected - Browser Extension is now connected"
+   
+   If no notification:
+   - Check mobile app is connected (shows "Connected")
+   - Check username is EXACTLY the same
+   - Rebuild mobile app with latest code
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 6: TEST CLIPBOARD (EASIEST TEST)
+   1. On computer: Copy text "Hello from browser!"
+   2. Check extension console:
+      ✅ "📋 Clipboard copied: Hello..."
+      ✅ "📤 Sending clipboard to backend..."
+   
+   3. On mobile: Open any app, long press, paste
+   4. Should see: "Hello from browser!" ✅
+   
+   If not working:
+   - Check extension console for errors
+   - Make sure "Universal Clipboard" toggle is ON in extension popup
+   - Try copying again
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 7: TEST MEDIA HANDOFF
+   1. Open NEW YouTube tab (fresh tab, not old one!)
+   2. Open page console (F12)
+   3. Should see: "🎬 FlowLink media detection loaded on: www.youtube.com"
+   
+   If you DON'T see this message:
+   - Content script didn't load
+   - Reload extension again
+   - Close ALL YouTube tabs
+   - Open NEW YouTube tab
+   
+   4. Play any video
+   5. Let it play for 10 seconds
+   6. PAUSE the video
+   7. Check console:
+      ✅ "📤 Sending media state: paused VideoTitle"
+   
+   8. Check extension background console:
+      ✅ "🎬 Media state changed: ..."
+      ✅ "⏸️ Media paused: VideoTitle"
+      ✅ "📤 Sending media handoff to backend..."
+   
+   9. Check mobile:
+      Should get notification: "Continue watching VideoTitle?"
+      Click "Continue" → YouTube opens at same timestamp ✅
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🐛 TROUBLESHOOTING:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+❌ "Extension context invalidated" error:
+   SOLUTION: Close ALL YouTube/Netflix tabs, then open NEW tabs
+   This error means old content scripts are running
+   Fresh tabs = fresh content scripts = no error!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+❌ "Message send failed: A listener indicated..." error:
+   SOLUTION: Fixed! Reload extension and refresh all tabs
+   This was caused by async response handling
+   Now all messages are synchronous
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+❌ Extension shows "Disconnected":
+   1. Check extension console for connection errors
+   2. Backend URL should be: wss://sparkling-courtesy-production-1cb0.up.railway.app
+   3. Check Railway backend is running
+   4. Reload extension
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+❌ No notification on mobile when extension connects:
+   1. Check mobile app has SAME username
+   2. Check mobile app shows "Connected"
+   3. Rebuild mobile app with latest code:
+      cd mobile/android
+      ./gradlew assembleDebug
+      adb install app/build/outputs/apk/debug/app-debug.apk
+   4. Restart mobile app
+   5. Reload extension and set username again
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+❌ Content scripts not loading (no "FlowLink media detection loaded"):
+   1. Close ALL YouTube tabs
+   2. Reload extension
+   3. Open NEW YouTube tab
+   4. Check page console (F12)
+   5. Should see: "🎬 FlowLink media detection loaded"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+❌ Clipboard not syncing:
+   1. Check "Universal Clipboard" toggle is ON in extension popup
+   2. Check extension console shows "📋 Clipboard copied"
+   3. Check mobile app has same username
+   4. Try copying again
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+❌ Media handoff not working:
+   1. Check "Smart Handoff" toggle is ON in extension popup
+   2. Check you're on a fresh YouTube tab (not old one)
+   3. Check page console shows "🎬 FlowLink media detection loaded"
+   4. Check extension console shows "⏸️ Media paused"
+   5. Make sure mobile has same username
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💡 PRO TIPS:
+
+1. ALWAYS close old tabs before testing
+2. ALWAYS open fresh tabs after reloading extension
+3. Check extension console FIRST before testing
+4. Check mobile app has SAME username
+5. Clipboard test is easiest - try that first!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ CHECKLIST BEFORE TESTING:
+
+□ All old YouTube/Netflix tabs closed
+□ Extension reloaded
+□ Extension console shows "Connected"
+□ Extension console shows "Device registered"
+□ Username set in extension: "Aaris"
+□ Mobile app username: "Aaris" (SAME!)
+□ Mobile app shows "Connected"
+□ Opened FRESH YouTube tab
+□ Page console shows "FlowLink media detection loaded"
+
+If ALL checked ✅ → IT WILL WORK!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎯 QUICK TEST SEQUENCE:
+
+1. Close all tabs
+2. Reload extension
+3. Set username "Aaris"
+4. Check mobile gets "Device Connected" notification
+5. Copy text → paste on mobile (should work!)
+6. Open fresh YouTube tab
+7. Play video → pause → mobile gets notification!
+
+DONE! 🎉
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

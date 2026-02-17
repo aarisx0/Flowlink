@@ -9,7 +9,7 @@
 function getSignalingWsUrl(): string {
   const envUrl = (import.meta as any)?.env?.VITE_SIGNALING_URL as string | undefined;
   // Default to local development backend
-  return envUrl || 'wss://flowlink-production.up.railway.app';
+  return envUrl || 'wss://sparkling-courtesy-production-1cb0.up.railway.app';
 }
 
 export const SIGNALING_WS_URL = getSignalingWsUrl();

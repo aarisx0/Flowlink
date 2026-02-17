@@ -7,9 +7,38 @@ console.log('FlowLink clipboard monitoring loaded');
 
 let lastClipboardText = '';
 let lastClipboardTime = 0;
+let isExtensionValid = true;
+
+// Check if extension context is valid
+function checkExtensionContext() {
+  try {
+    chrome.runtime.id;
+    return true;
+  } catch (err) {
+    if (!isExtensionValid) return false; // Already logged
+    isExtensionValid = false;
+    console.warn('⚠️ Extension context invalidated. Please refresh this page.');
+    return false;
+  }
+}
+
+// Safe message sending
+function sendToBackground(message) {
+  if (!checkExtensionContext()) return;
+  
+  try {
+    chrome.runtime.sendMessage(message);
+  } catch (err) {
+    if (err.message.includes('context invalidated')) {
+      isExtensionValid = false;
+    }
+  }
+}
 
 // Monitor copy events
 document.addEventListener('copy', async (e) => {
+  if (!checkExtensionContext()) return;
+  
   try {
     // Small delay to ensure clipboard is populated
     setTimeout(async () => {
@@ -25,10 +54,10 @@ document.addEventListener('copy', async (e) => {
         lastClipboardText = text;
         lastClipboardTime = Date.now();
         
-        console.log('Clipboard copied:', text.substring(0, 50));
+        console.log('📋 Clipboard copied:', text.substring(0, 50));
         
         // Send to background script
-        chrome.runtime.sendMessage({
+        sendToBackground({
           type: 'clipboard_changed',
           data: {
             text,
@@ -36,7 +65,11 @@ document.addEventListener('copy', async (e) => {
           }
         });
       } catch (err) {
-        console.error('Failed to read clipboard:', err);
+        if (err.message.includes('context invalidated')) {
+          isExtensionValid = false;
+        } else {
+          console.error('Failed to read clipboard:', err);
+        }
       }
     }, 100);
   } catch (err) {
@@ -46,6 +79,8 @@ document.addEventListener('copy', async (e) => {
 
 // Monitor cut events
 document.addEventListener('cut', async (e) => {
+  if (!checkExtensionContext()) return;
+  
   try {
     setTimeout(async () => {
       try {
@@ -58,9 +93,9 @@ document.addEventListener('cut', async (e) => {
         lastClipboardText = text;
         lastClipboardTime = Date.now();
         
-        console.log('Clipboard cut:', text.substring(0, 50));
+        console.log('✂️ Clipboard cut:', text.substring(0, 50));
         
-        chrome.runtime.sendMessage({
+        sendToBackground({
           type: 'clipboard_changed',
           data: {
             text,
@@ -68,7 +103,9 @@ document.addEventListener('cut', async (e) => {
           }
         });
       } catch (err) {
-        console.error('Failed to read clipboard:', err);
+        if (!err.message.includes('context invalidated')) {
+          console.error('Failed to read clipboard:', err);
+        }
       }
     }, 100);
   } catch (err) {
@@ -78,6 +115,8 @@ document.addEventListener('cut', async (e) => {
 
 // Keyboard shortcut monitoring (Ctrl+C, Cmd+C)
 document.addEventListener('keydown', async (e) => {
+  if (!checkExtensionContext()) return;
+  
   // Check for Ctrl+C or Cmd+C
   if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
     setTimeout(async () => {
@@ -91,9 +130,9 @@ document.addEventListener('keydown', async (e) => {
         lastClipboardText = text;
         lastClipboardTime = Date.now();
         
-        console.log('Clipboard (keyboard):', text.substring(0, 50));
+        console.log('⌨️ Clipboard (keyboard):', text.substring(0, 50));
         
-        chrome.runtime.sendMessage({
+        sendToBackground({
           type: 'clipboard_changed',
           data: {
             text,
@@ -109,7 +148,12 @@ document.addEventListener('keydown', async (e) => {
 
 // Periodic clipboard check (fallback for apps that don't trigger events)
 let lastCheckedText = '';
-setInterval(async () => {
+const clipboardCheckInterval = setInterval(async () => {
+  if (!checkExtensionContext()) {
+    clearInterval(clipboardCheckInterval);
+    return;
+  }
+  
   try {
     const text = await navigator.clipboard.readText();
     
@@ -118,9 +162,9 @@ setInterval(async () => {
       lastClipboardText = text;
       lastClipboardTime = Date.now();
       
-      console.log('Clipboard (periodic check):', text.substring(0, 50));
+      console.log('🔄 Clipboard (periodic check):', text.substring(0, 50));
       
-      chrome.runtime.sendMessage({
+      sendToBackground({
         type: 'clipboard_changed',
         data: {
           text,
@@ -133,4 +177,4 @@ setInterval(async () => {
   }
 }, 2000); // Check every 2 seconds
 
-console.log('Clipboard monitoring active');
+console.log('✅ Clipboard monitoring active');

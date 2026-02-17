@@ -22,20 +22,25 @@ class NotificationService(private val context: Context) {
         const val CHANNEL_ID_INVITATIONS = "session_invitations"
         const val CHANNEL_ID_NEARBY = "nearby_sessions"
         const val CHANNEL_ID_GENERAL = "general"
+        const val CHANNEL_ID_MEDIA = "media_handoff"
         
         const val NOTIFICATION_ID_INVITATION = 1001
         const val NOTIFICATION_ID_NEARBY = 1002
         const val NOTIFICATION_ID_GENERAL = 1003
+        const val NOTIFICATION_ID_MEDIA = 1004
         
         const val ACTION_ACCEPT_INVITATION = "accept_invitation"
         const val ACTION_REJECT_INVITATION = "reject_invitation"
         const val ACTION_JOIN_NEARBY = "join_nearby"
         const val ACTION_DISMISS = "dismiss"
+        const val ACTION_CONTINUE_MEDIA = "continue_media"
         
         const val EXTRA_SESSION_ID = "session_id"
         const val EXTRA_SESSION_CODE = "session_code"
         const val EXTRA_INVITER_USERNAME = "inviter_username"
         const val EXTRA_INVITER_DEVICE_NAME = "inviter_device_name"
+        const val EXTRA_MEDIA_URL = "media_url"
+        const val EXTRA_MEDIA_TIMESTAMP = "media_timestamp"
     }
     
     private val notificationManager = NotificationManagerCompat.from(context)
@@ -60,6 +65,13 @@ class NotificationService(private val context: Context) {
                     NotificationManager.IMPORTANCE_DEFAULT
                 ).apply {
                     description = "Notifications for nearby FlowLink sessions"
+                },
+                NotificationChannel(
+                    CHANNEL_ID_MEDIA,
+                    "Media Handoff",
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "Notifications for continuing media playback from other devices"
                 },
                 NotificationChannel(
                     CHANNEL_ID_GENERAL,
@@ -178,6 +190,70 @@ class NotificationService(private val context: Context) {
             .build()
         
         notificationManager.notify(NOTIFICATION_ID_GENERAL, notification)
+    }
+    
+    /**
+     * Show device connected notification
+     */
+    fun showDeviceConnected(deviceName: String, deviceType: String) {
+        val deviceIcon = when (deviceType) {
+            "browser" -> "🌐"
+            "mobile" -> "📱"
+            "desktop" -> "💻"
+            else -> "📱"
+        }
+        
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID_GENERAL)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("$deviceIcon Device Connected")
+            .setContentText("$deviceName is now connected")
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .build()
+        
+        notificationManager.notify(NOTIFICATION_ID_GENERAL, notification)
+    }
+    
+    /**
+     * Show media handoff notification
+     */
+    fun showMediaHandoff(title: String, url: String, timestamp: Int, platform: String) {
+        // Create intent to open the media URL
+        val continueIntent = Intent(Intent.ACTION_VIEW).apply {
+            data = android.net.Uri.parse(url)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        
+        val continuePendingIntent = PendingIntent.getActivity(
+            context,
+            0,
+            continueIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID_MEDIA)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("🎬 Continue Watching?")
+            .setContentText("$title\nFrom: $platform")
+            .setStyle(NotificationCompat.BigTextStyle()
+                .bigText("$title\nFrom: $platform\nAt: ${formatTimestamp(timestamp)}"))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(continuePendingIntent)
+            .addAction(
+                R.drawable.ic_notification,
+                "Continue",
+                continuePendingIntent
+            )
+            .build()
+        
+        notificationManager.notify(NOTIFICATION_ID_MEDIA, notification)
+    }
+    
+    private fun formatTimestamp(seconds: Int): String {
+        val minutes = seconds / 60
+        val secs = seconds % 60
+        return String.format("%d:%02d", minutes, secs)
     }
     
     /**

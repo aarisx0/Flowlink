@@ -47,7 +47,7 @@ document.addEventListener('DOMContentLoaded', () => {
   notificationsToggle.addEventListener('change', handleSettingChange);
   
   openWebAppBtn.addEventListener('click', () => {
-    chrome.tabs.create({ url: 'https://flowlink.vercel.app' });
+    chrome.tabs.create({ url: 'https://flowlink-weld.vercel.app' });
   });
   
   logoutBtn.addEventListener('click', handleLogout);
@@ -157,9 +157,14 @@ function updateConnectionStatus(connected) {
   if (connected) {
     statusDot.className = 'status-dot connected';
     statusText.textContent = 'Connected';
+    console.log('✅ Extension connected to backend');
+    if (currentUsername) {
+      console.log('👤 Username:', currentUsername);
+    }
   } else {
     statusDot.className = 'status-dot disconnected';
     statusText.textContent = 'Disconnected';
+    console.log('❌ Extension disconnected from backend');
   }
 }
 
