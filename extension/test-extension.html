@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FlowLink Extension Test Page</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 16px;
+      padding: 40px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    }
+
+    h1 {
+      color: #1f2937;
+      margin-bottom: 10px;
+      font-size: 32px;
+    }
+
+    .subtitle {
+      color: #6b7280;
+      margin-bottom: 30px;
+      font-size: 16px;
+    }
+
+    .test-section {
+      background: #f9fafb;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 24px;
+      border: 2px solid #e5e7eb;
+    }
+
+    .test-section h2 {
+      color: #374151;
+      font-size: 20px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .test-section p {
+      color: #6b7280;
+      margin-bottom: 16px;
+      line-height: 1.6;
+    }
+
+    .test-item {
+      background: white;
+      padding: 16px;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      border: 1px solid #e5e7eb;
+    }
+
+    .test-item:last-child {
+      margin-bottom: 0;
+    }
+
+    .test-item strong {
+      color: #1f2937;
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    .test-item code {
+      background: #f3f4f6;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      color: #667eea;
+    }
+
+    .video-container {
+      margin-top: 16px;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #000;
+    }
+
+    video {
+      width: 100%;
+      display: block;
+    }
+
+    .clipboard-test {
+      background: white;
+      border: 2px dashed #cbd5e1;
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 16px;
+      min-height: 100px;
+      cursor: text;
+    }
+
+    .clipboard-test:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .status.success {
+      background: #d1fae5;
+      color: #065f46;
+    }
+
+    .status.info {
+      background: #dbeafe;
+      color: #1e40af;
+    }
+
+    .status.warning {
+      background: #fef3c7;
+      color: #92400e;
+    }
+
+    .icon {
+      font-size: 24px;
+    }
+
+    .instructions {
+      background: #eff6ff;
+      border-left: 4px solid #3b82f6;
+      padding: 16px;
+      border-radius: 8px;
+      margin-top: 16px;
+    }
+
+    .instructions strong {
+      color: #1e40af;
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    .instructions ol {
+      margin-left: 20px;
+      color: #1e3a8a;
+    }
+
+    .instructions li {
+      margin-bottom: 6px;
+    }
+
+    .footer {
+      text-align: center;
+      margin-top: 30px;
+      padding-top: 20px;
+      border-top: 1px solid #e5e7eb;
+      color: #6b7280;
+      font-size: 14px;
+    }
+
+    button {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+
+    button:hover {
+      transform: translateY(-2px);
+    }
+
+    button:active {
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🧪 FlowLink Extension Test Page</h1>
+    <p class="subtitle">Use this page to verify your FlowLink browser extension is working correctly</p>
+
+    <!-- Extension Status -->
+    <div class="test-section">
+      <h2><span class="icon">🔌</span> Extension Status</h2>
+      <p>Check if the FlowLink extension is installed and running:</p>
+      <div class="test-item">
+        <strong>Extension Installed:</strong>
+        <span class="status info" id="extensionStatus">Checking...</span>
+      </div>
+      <div class="instructions">
+        <strong>How to check:</strong>
+        <ol>
+          <li>Look for the FlowLink icon in your browser toolbar</li>
+          <li>Click the icon to open the popup</li>
+          <li>Verify connection status shows "Connected" (green dot)</li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- Media Handoff Test -->
+    <div class="test-section">
+      <h2><span class="icon">🎬</span> Smart Handoff Test</h2>
+      <p>Test media detection and handoff functionality:</p>
+      
+      <div class="test-item">
+        <strong>Test Video:</strong>
+        <div class="video-container">
+          <video id="testVideo" controls>
+            <source src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+          </video>
+        </div>
+      </div>
+
+      <div class="instructions">
+        <strong>How to test:</strong>
+        <ol>
+          <li>Play the video above</li>
+          <li>Pause the video</li>
+          <li>Check your other device (mobile/web app) for a notification</li>
+          <li>Click "Continue" on the other device</li>
+          <li>Verify the video opens at the same timestamp</li>
+        </ol>
+      </div>
+
+      <div class="test-item">
+        <strong>Alternative Test:</strong>
+        <p style="margin: 0;">Open YouTube, Netflix, or Spotify and test with real content</p>
+        <div style="margin-top: 12px; display: flex; gap: 8px;">
+          <button onclick="window.open('https://www.youtube.com/watch?v=dQw4w9WgXcQ', '_blank')">Test YouTube</button>
+          <button onclick="window.open('https://open.spotify.com', '_blank')">Test Spotify</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Clipboard Test -->
+    <div class="test-section">
+      <h2><span class="icon">📋</span> Universal Clipboard Test</h2>
+      <p>Test clipboard synchronization across devices:</p>
+      
+      <div class="test-item">
+        <strong>Test Text:</strong>
+        <div class="clipboard-test" contenteditable="true" id="clipboardTest">
+          Select and copy this text to test clipboard sync! 🚀
+          
+Try copying this entire paragraph and pasting it on your mobile device or another browser tab with FlowLink.
+        </div>
+      </div>
+
+      <div class="instructions">
+        <strong>How to test:</strong>
+        <ol>
+          <li>Select the text above and copy it (Ctrl+C or Cmd+C)</li>
+          <li>Check your other device (mobile/web app)</li>
+          <li>Try pasting (Ctrl+V or long press → Paste)</li>
+          <li>You should see the same text</li>
+          <li>Try the reverse: copy text on mobile, paste here</li>
+        </ol>
+      </div>
+
+      <div class="test-item">
+        <strong>Quick Copy Test:</strong>
+        <p style="margin-bottom: 12px;">Click the button to copy test text:</p>
+        <button onclick="copyTestText()">Copy Test Text</button>
+        <span id="copyStatus" style="margin-left: 12px; color: #059669;"></span>
+      </div>
+    </div>
+
+    <!-- Notifications Test -->
+    <div class="test-section">
+      <h2><span class="icon">🔔</span> Notifications Test</h2>
+      <p>Verify that notifications are working:</p>
+      
+      <div class="test-item">
+        <strong>Expected Notifications:</strong>
+        <ul style="margin-left: 20px; color: #6b7280;">
+          <li>Media handoff: "Continue watching [title]?" with Continue/Dismiss buttons</li>
+          <li>Clipboard sync: "Clipboard Synced" with preview of copied text</li>
+        </ul>
+      </div>
+
+      <div class="instructions">
+        <strong>How to verify:</strong>
+        <ol>
+          <li>Open extension popup and ensure "Notifications" toggle is ON</li>
+          <li>Grant notification permission if prompted</li>
+          <li>Perform media handoff or clipboard sync test</li>
+          <li>Look for Chrome notification in top-right corner</li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- Console Logs -->
+    <div class="test-section">
+      <h2><span class="icon">🔍</span> Debug Console</h2>
+      <p>Check browser console for extension logs:</p>
+      
+      <div class="instructions">
+        <strong>How to check:</strong>
+        <ol>
+          <li>Right-click on this page → Inspect</li>
+          <li>Go to Console tab</li>
+          <li>Look for messages starting with "FlowLink"</li>
+          <li>You should see: "FlowLink media detection loaded" and "FlowLink clipboard monitoring loaded"</li>
+        </ol>
+      </div>
+
+      <div class="test-item">
+        <strong>Background Script Console:</strong>
+        <ol style="margin-left: 20px; color: #6b7280;">
+          <li>Go to <code>chrome://extensions/</code></li>
+          <li>Find FlowLink extension</li>
+          <li>Click "Inspect views: background page"</li>
+          <li>Check Console for connection status and message logs</li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div class="test-section">
+      <h2><span class="icon">✅</span> Test Results</h2>
+      <p>Mark off each test as you complete it:</p>
+      
+      <div class="test-item">
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+          <input type="checkbox" id="check1">
+          <span>Extension is installed and connected</span>
+        </label>
+      </div>
+      
+      <div class="test-item">
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+          <input type="checkbox" id="check2">
+          <span>Media handoff works (video pause detected)</span>
+        </label>
+      </div>
+      
+      <div class="test-item">
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+          <input type="checkbox" id="check3">
+          <span>Clipboard sync works (text copied to other device)</span>
+        </label>
+      </div>
+      
+      <div class="test-item">
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+          <input type="checkbox" id="check4">
+          <span>Notifications appear correctly</span>
+        </label>
+      </div>
+      
+      <div class="test-item">
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+          <input type="checkbox" id="check5">
+          <span>Console logs show no errors</span>
+        </label>
+      </div>
+
+      <div id="allTestsComplete" style="display: none; margin-top: 16px; padding: 16px; background: #d1fae5; border-radius: 8px; color: #065f46; text-align: center; font-weight: 500;">
+        🎉 All tests complete! Your FlowLink extension is working perfectly!
+      </div>
+    </div>
+
+    <div class="footer">
+      <p>FlowLink Browser Extension Test Page</p>
+      <p style="margin-top: 8px; font-size: 12px;">For detailed troubleshooting, see EXTENSION_INSTALLATION_GUIDE.md</p>
+    </div>
+  </div>
+
+  <script>
+    // Check if all tests are complete
+    const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+    const allTestsDiv = document.getElementById('allTestsComplete');
+
+    checkboxes.forEach(checkbox => {
+      checkbox.addEventListener('change', () => {
+        const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+        allTestsDiv.style.display = allChecked ? 'block' : 'none';
+      });
+    });
+
+    // Copy test text function
+    function copyTestText() {
+      const text = 'FlowLink clipboard sync test - ' + new Date().toLocaleTimeString();
+      navigator.clipboard.writeText(text).then(() => {
+        const status = document.getElementById('copyStatus');
+        status.textContent = '✓ Copied! Check other devices.';
+        setTimeout(() => {
+          status.textContent = '';
+        }, 3000);
+      }).catch(err => {
+        console.error('Failed to copy:', err);
+        alert('Failed to copy text. Please grant clipboard permission.');
+      });
+    }
+
+    // Check extension status
+    window.addEventListener('load', () => {
+      const statusEl = document.getElementById('extensionStatus');
+      
+      // Try to detect if content script is loaded
+      setTimeout(() => {
+        // If content scripts are loaded, they'll log to console
+        // This is a simple check - in reality, extension detection is complex
+        statusEl.innerHTML = '<span class="status info">Check extension icon in toolbar</span>';
+      }, 1000);
+    });
+
+    // Log video events for debugging
+    const video = document.getElementById('testVideo');
+    video.addEventListener('play', () => console.log('Video playing'));
+    video.addEventListener('pause', () => console.log('Video paused'));
+  </script>
+</body>
+</html>

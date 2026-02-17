@@ -141,6 +141,10 @@ wss.on('connection', (ws, req) => {
           handleIntentSend(ws, message);
           break;
           
+        case 'media_handoff':
+          handleMediaHandoff(ws, message);
+          break;
+          
         case 'clipboard_broadcast':
           handleClipboardBroadcast(ws, message);
           break;
@@ -174,6 +178,13 @@ wss.on('connection', (ws, req) => {
           
         case 'group_broadcast':
           handleGroupBroadcast(ws, message);
+          break;
+          
+        case 'ping':
+          // Keepalive ping from extension
+          if (ws.readyState === ws.OPEN) {
+            ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
+          }
           break;
           
         default:
@@ -924,6 +935,70 @@ function handleIntentSend(ws, message) {
 }
 
 /**
+ * Handle media handoff (smart handoff from browser extension)
+ */
+function handleMediaHandoff(ws, message) {
+  const { sessionId, deviceId } = message;
+  const { action, title, url, timestamp, platform } = message.payload;
+
+  console.log(`handleMediaHandoff: Device ${deviceId} - ${action} on ${platform}: ${title}`);
+
+  // If device is in a session, broadcast to session devices
+  if (sessionId) {
+    const session = sessions.get(sessionId);
+    if (session) {
+      broadcastToSession(sessionId, {
+        type: 'media_handoff_offer',
+        sessionId,
+        payload: {
+          title,
+          url,
+          timestamp,
+          platform,
+          fromDeviceId: deviceId
+        },
+        timestamp: Date.now()
+      }, deviceId); // Exclude sender
+
+      console.log(`Media handoff broadcast to session ${sessionId}`);
+      return;
+    }
+  }
+
+  // If not in session, broadcast to all devices with same username
+  const senderDevice = globalDevices.get(deviceId);
+  if (senderDevice && senderDevice.device.username) {
+    const username = senderDevice.device.username;
+    console.log(`Broadcasting media handoff to all devices with username: ${username}`);
+
+    for (const [targetDeviceId, deviceEntry] of globalDevices.entries()) {
+      if (targetDeviceId === deviceId) continue; // Skip sender
+      if (deviceEntry.device.username !== username) continue; // Only same username
+
+      // Send to all connections of this device
+      for (const targetWs of deviceEntry.connections) {
+        if (targetWs.readyState === targetWs.OPEN) {
+          targetWs.send(JSON.stringify({
+            type: 'media_handoff_offer',
+            sessionId: null,
+            deviceId: targetDeviceId,
+            payload: {
+              title,
+              url,
+              timestamp,
+              platform,
+              fromDeviceId: deviceId
+            },
+            timestamp: Date.now()
+          }));
+          console.log(`Media handoff sent to device ${targetDeviceId}`);
+        }
+      }
+    }
+  }
+}
+
+/**
  * Handle clipboard broadcast (universal clipboard sync)
  */
 function handleClipboardBroadcast(ws, message) {
@@ -932,24 +1007,51 @@ function handleClipboardBroadcast(ws, message) {
 
   console.log(`handleClipboardBroadcast: Device ${deviceId} broadcasting clipboard`);
 
-  const session = sessions.get(sessionId);
-  if (!session) {
-    console.error(`Session ${sessionId} not found`);
-    sendError(ws, 'Session not found');
-    return;
+  // If device is in a session, broadcast to session devices
+  if (sessionId) {
+    const session = sessions.get(sessionId);
+    if (session) {
+      broadcastToSession(sessionId, {
+        type: 'clipboard_sync',
+        sessionId,
+        payload: {
+          clipboard: clipboard
+        },
+        timestamp: Date.now()
+      }, deviceId); // Exclude sender
+
+      console.log(`Clipboard broadcast to session ${sessionId}`);
+      return;
+    }
   }
 
-  // Broadcast clipboard to all OTHER devices in session
-  broadcastToSession(sessionId, {
-    type: 'clipboard_sync',
-    sessionId,
-    payload: {
-      clipboard: clipboard
-    },
-    timestamp: Date.now()
-  }, deviceId); // Exclude sender
+  // If not in session, broadcast to all devices with same username
+  const senderDevice = globalDevices.get(deviceId);
+  if (senderDevice && senderDevice.device.username) {
+    const username = senderDevice.device.username;
+    console.log(`Broadcasting clipboard to all devices with username: ${username}`);
 
-  console.log(`Clipboard broadcast to all devices in session ${sessionId}`);
+    for (const [targetDeviceId, deviceEntry] of globalDevices.entries()) {
+      if (targetDeviceId === deviceId) continue; // Skip sender
+      if (deviceEntry.device.username !== username) continue; // Only same username
+
+      // Send to all connections of this device
+      for (const targetWs of deviceEntry.connections) {
+        if (targetWs.readyState === targetWs.OPEN) {
+          targetWs.send(JSON.stringify({
+            type: 'clipboard_sync',
+            sessionId: null,
+            deviceId: targetDeviceId,
+            payload: {
+              clipboard: clipboard
+            },
+            timestamp: Date.now()
+          }));
+          console.log(`Clipboard sync sent to device ${targetDeviceId}`);
+        }
+      }
+    }
+  }
 }
 
 /**

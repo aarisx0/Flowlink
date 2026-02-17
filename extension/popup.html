@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FlowLink</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <img src="icons/icon48.png" alt="FlowLink" class="logo">
+      <h1>FlowLink</h1>
+      <div class="status" id="status">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">Connecting...</span>
+      </div>
+    </div>
+
+    <!-- Setup Screen (shown if not logged in) -->
+    <div id="setupScreen" class="screen" style="display: none;">
+      <h2>Welcome to FlowLink!</h2>
+      <p>Enter your username to get started</p>
+      
+      <div class="form-group">
+        <label for="usernameInput">Username</label>
+        <input type="text" id="usernameInput" placeholder="Enter your username" />
+      </div>
+      
+      <button id="setupBtn" class="btn btn-primary">Get Started</button>
+      
+      <div class="info">
+        <p>💡 Use the same username on all your devices to sync them together</p>
+      </div>
+    </div>
+
+    <!-- Main Screen (shown when logged in) -->
+    <div id="mainScreen" class="screen" style="display: none;">
+      <!-- User Info -->
+      <div class="user-info">
+        <div class="user-avatar">👤</div>
+        <div class="user-details">
+          <div class="user-name" id="userName">Loading...</div>
+          <div class="user-device">Browser Extension</div>
+        </div>
+      </div>
+
+      <!-- Features -->
+      <div class="features">
+        <h3>Features</h3>
+        
+        <div class="feature-item">
+          <div class="feature-info">
+            <div class="feature-icon">🎬</div>
+            <div class="feature-text">
+              <div class="feature-title">Smart Handoff</div>
+              <div class="feature-desc">Continue media on other devices</div>
+            </div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="smartHandoffToggle" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="feature-item">
+          <div class="feature-info">
+            <div class="feature-icon">📋</div>
+            <div class="feature-text">
+              <div class="feature-title">Universal Clipboard</div>
+              <div class="feature-desc">Sync clipboard across devices</div>
+            </div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="clipboardToggle" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="feature-item">
+          <div class="feature-info">
+            <div class="feature-icon">🔔</div>
+            <div class="feature-text">
+              <div class="feature-title">Notifications</div>
+              <div class="feature-desc">Show handoff notifications</div>
+            </div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="notificationsToggle" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Recent Activity -->
+      <div class="activity">
+        <h3>Recent Activity</h3>
+        <div id="activityList" class="activity-list">
+          <div class="activity-empty">No recent activity</div>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="actions">
+        <button id="openWebAppBtn" class="btn btn-secondary">Open FlowLink Web</button>
+        <button id="logoutBtn" class="btn btn-text">Logout</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
