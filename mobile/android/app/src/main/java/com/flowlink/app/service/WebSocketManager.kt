@@ -68,8 +68,7 @@ class WebSocketManager(private val mainActivity: MainActivity) {
         val type: String
     )
 
-    // Local backend
-    private val WS_URL = "ws://192.168.0.104:8080"
+    private val WS_URL = BackendConfig.WS_URL
 
     fun connect(sessionCode: String) {
         try {
@@ -454,6 +453,7 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     val sourceDeviceId = payload.optString("sourceDeviceId", "")
                     val sourceUsername = payload.optString("sourceUsername", "Unknown")
                     val sourceDeviceName = payload.optString("sourceDeviceName", "Unknown Device")
+                    sessionManager.setPreferredTargetUsername(sourceUsername)
 
                     try {
                         mainActivity.notificationService.showReceiverConnected(sourceUsername, sourceDeviceName)

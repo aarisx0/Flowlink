@@ -30,8 +30,10 @@ class ClipboardSyncService : Service() {
         
         val clip = clipboardManager?.primaryClip
         if (clip != null && clip.itemCount > 0) {
-            val text = clip.getItemAt(0).coerceToText(this).toString()
-            
+            val item = clip.getItemAt(0)
+            val text = item.coerceToText(this).toString()
+            val url = extractUrl(text, item.uri)
+             
             // Ignore if same as last text (avoid loops)
             if (text == lastClipboardText || text.isBlank()) {
                 return@OnPrimaryClipChangedListener
@@ -47,7 +49,7 @@ class ClipboardSyncService : Service() {
             Log.d("FlowLink", "📋 Clipboard changed: ${text.take(50)}...")
             
             // Send to all connected devices
-            sendClipboardToDevices(text)
+            sendClipboardToDevices(text, url)
         }
     }
     
@@ -117,6 +119,18 @@ class ClipboardSyncService : Service() {
         }
         clipboardManager?.setPrimaryClip(clip)
         Log.d("FlowLink", "📋 Clipboard updated from remote: ${textToCopy.take(50)}...")
+
+        if (!url.isNullOrBlank()) {
+            try {
+                val openIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(openIntent)
+                Log.d("FlowLink", "🌐 Opened URL from remote clipboard: $url")
+            } catch (e: Exception) {
+                Log.e("FlowLink", "Failed to open URL from remote clipboard", e)
+            }
+        }
     }
 
     private fun persistImageToCache(dataUrl: String): Uri? {
@@ -151,12 +165,19 @@ class ClipboardSyncService : Service() {
         }
     }
     
-    private fun sendClipboardToDevices(text: String) {
+    private fun sendClipboardToDevices(text: String, url: String?) {
         // Broadcast to MainActivity to send via WebSocket
         val broadcastIntent = Intent(ACTION_CLIPBOARD_CHANGED)
         broadcastIntent.putExtra(EXTRA_TEXT, text)
+        broadcastIntent.putExtra(EXTRA_URL, url)
         broadcastIntent.setPackage(packageName)
         sendBroadcast(broadcastIntent)
+    }
+
+    private fun extractUrl(text: String, itemUri: Uri?): String? {
+        val candidate = itemUri?.toString()?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+            ?: text.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+        return candidate?.takeIf { it.isNotBlank() }
     }
     
     private fun isSensitiveData(text: String): Boolean {

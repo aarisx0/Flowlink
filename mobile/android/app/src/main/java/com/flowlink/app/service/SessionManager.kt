@@ -133,6 +133,7 @@ class SessionManager(private val context: Context) {
     fun getDeviceId(): String = deviceId
     fun getDeviceName(): String = deviceName
     fun getDeviceType(): String = deviceType
+    fun getPreferredTargetUsername(): String? = prefs.getString("preferred_target_username", null)
 
     suspend fun handleIncomingFile(uri: Uri) {
         // Handle incoming file intent
@@ -155,6 +156,11 @@ class SessionManager(private val context: Context) {
         prefs.edit().putString("username", newUsername).apply()
         android.util.Log.d("FlowLink", "Username updated to: $newUsername")
     }
-    
+
+    fun setPreferredTargetUsername(targetUsername: String?) {
+        prefs.edit().putString("preferred_target_username", targetUsername).apply()
+        android.util.Log.d("FlowLink", "Preferred target username updated to: $targetUsername")
+    }
+     
     fun hasUsername(): Boolean = username.isNotEmpty()
 }

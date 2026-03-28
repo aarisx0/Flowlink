@@ -965,23 +965,18 @@ function handleDeviceConnectedNotification(ws, message) {
       if (targetDeviceId === deviceId) continue; // Skip sender
       if (deviceEntry.device.username !== notifyUsername) continue; // Only same username
 
-      // Send to all connections of this device
-      for (const targetWs of deviceEntry.connections) {
-        if (targetWs.readyState === targetWs.OPEN) {
-          targetWs.send(JSON.stringify({
-            type: 'device_connected',
-            sessionId: null,
-            deviceId: targetDeviceId,
-            payload: {
-              deviceName,
-              deviceType,
-              username: notifyUsername
-            },
-            timestamp: Date.now()
-          }));
-          console.log(`Device connected notification sent to device ${targetDeviceId}`);
-        }
-      }
+      sendToSingleDevice(targetDeviceId, {
+        type: 'device_connected',
+        sessionId: null,
+        deviceId: targetDeviceId,
+        payload: {
+          deviceName,
+          deviceType,
+          username: notifyUsername
+        },
+        timestamp: Date.now()
+      });
+      console.log(`Device connected notification sent to device ${targetDeviceId}`);
     }
   }
 }
@@ -1029,25 +1024,20 @@ function handleMediaHandoff(ws, message) {
       if (targetDeviceId === deviceId) continue; // Skip sender
       if (deviceEntry.device.username !== username) continue; // Only same username
 
-      // Send to all connections of this device
-      for (const targetWs of deviceEntry.connections) {
-        if (targetWs.readyState === targetWs.OPEN) {
-          targetWs.send(JSON.stringify({
-            type: 'media_handoff_offer',
-            sessionId: null,
-            deviceId: targetDeviceId,
-            payload: {
-              title,
-              url,
-              timestamp,
-              platform,
-              fromDeviceId: deviceId
-            },
-            timestamp: Date.now()
-          }));
-          console.log(`Media handoff sent to device ${targetDeviceId}`);
-        }
-      }
+      sendToSingleDevice(targetDeviceId, {
+        type: 'media_handoff_offer',
+        sessionId: null,
+        deviceId: targetDeviceId,
+        payload: {
+          title,
+          url,
+          timestamp,
+          platform,
+          fromDeviceId: deviceId
+        },
+        timestamp: Date.now()
+      });
+      console.log(`Media handoff sent to device ${targetDeviceId}`);
     }
   }
 }
@@ -1091,23 +1081,40 @@ function handleClipboardBroadcast(ws, message) {
       if (targetDeviceId === deviceId) continue; // Skip sender
       if (deviceEntry.device.username !== username) continue; // Only same username
 
-      // Send to all connections of this device
-      for (const targetWs of deviceEntry.connections) {
-        if (targetWs.readyState === targetWs.OPEN) {
-          targetWs.send(JSON.stringify({
-            type: 'clipboard_sync',
-            sessionId: null,
-            deviceId: targetDeviceId,
-            payload: {
-              clipboard: clipboard
-            },
-            timestamp: Date.now()
-          }));
-          console.log(`Clipboard sync sent to device ${targetDeviceId}`);
-        }
-      }
+      sendToSingleDevice(targetDeviceId, {
+        type: 'clipboard_sync',
+        sessionId: null,
+        deviceId: targetDeviceId,
+        payload: {
+          clipboard: clipboard
+        },
+        timestamp: Date.now()
+      });
+      console.log(`Clipboard sync sent to device ${targetDeviceId}`);
     }
   }
+}
+
+function sendToSingleDevice(targetDeviceId, message) {
+  const primaryConnection = deviceConnections.get(targetDeviceId);
+  if (primaryConnection && primaryConnection.readyState === primaryConnection.OPEN) {
+    primaryConnection.send(JSON.stringify(message));
+    return true;
+  }
+
+  const deviceEntry = globalDevices.get(targetDeviceId);
+  if (!deviceEntry) {
+    return false;
+  }
+
+  for (const targetWs of deviceEntry.connections) {
+    if (targetWs.readyState === targetWs.OPEN) {
+      targetWs.send(JSON.stringify(message));
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function getOpenConnectionsForUsername(targetUsername, excludeDeviceId = null) {
@@ -1152,7 +1159,7 @@ function handleTargetConnectionPing(ws, message) {
   }
 
   for (const { targetDeviceId, targetWs, deviceEntry } of matches) {
-    targetWs.send(JSON.stringify({
+    sendToSingleDevice(targetDeviceId, {
       type: 'target_connection_request',
       deviceId: targetDeviceId,
       payload: {
@@ -1163,7 +1170,7 @@ function handleTargetConnectionPing(ws, message) {
         targetDeviceName: deviceEntry.device.name
       },
       timestamp: Date.now()
-    }));
+    });
   }
 
   ws.send(JSON.stringify({

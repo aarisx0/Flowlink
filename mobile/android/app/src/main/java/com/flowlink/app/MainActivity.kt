@@ -50,12 +50,8 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
     
     private val clipboardReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == ClipboardSyncService.ACTION_CLIPBOARD_CHANGED) {
-                val text = intent.getStringExtra(ClipboardSyncService.EXTRA_TEXT)
-                if (text != null) {
-                    sendClipboardToAllDevices(text)
-                }
-            }
+            // Clipboard sync is handled by InvitationListenerService so it
+            // continues working when the activity is not visible.
         }
     }
 
@@ -175,9 +171,6 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
             android.util.Log.e("FlowLink", "Failed to connect WebSocket", e)
         }
         
-        // Start background service for notifications when app is closed
-        // TODO: Re-enable after fixing foreground service issues
-        /*
         val username = sessionManager.getUsername()
         val deviceId = sessionManager.getDeviceId()
         val deviceName = sessionManager.getDeviceName()
@@ -187,16 +180,7 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
         } else {
             android.util.Log.w("FlowLink", "Cannot start InvitationListenerService: missing username, deviceId, or deviceName")
         }
-        */
-        
-        // Register clipboard receiver with API level check
-        val filter = IntentFilter(ClipboardSyncService.ACTION_CLIPBOARD_CHANGED)
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            registerReceiver(clipboardReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(clipboardReceiver, filter)
-        }
-        
+
         // Start clipboard sync service
         startClipboardSyncService()
 
@@ -887,23 +871,12 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
     
     override fun onDestroy() {
         super.onDestroy()
-        try {
-            unregisterReceiver(clipboardReceiver)
-        } catch (e: Exception) {
-            // Receiver not registered
-        }
-        stopClipboardSyncService()
     }
     
     private fun startClipboardSyncService() {
         val serviceIntent = Intent(this, ClipboardSyncService::class.java)
         startService(serviceIntent)
-        
-        // Enable clipboard sync when in a session
-        val currentCode = sessionManager.getCurrentSessionCode()
-        if (currentCode != null) {
-            enableClipboardSync()
-        }
+        enableClipboardSync()
     }
     
     private fun stopClipboardSyncService() {
@@ -936,18 +909,18 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
                     put("text", text)
                 }
                 
-                val sessionId = sessionManager.getCurrentSessionId()
-                if (sessionId != null) {
-                    webSocketManager.sendMessage(org.json.JSONObject().apply {
-                        put("type", "clipboard_broadcast")
-                        put("sessionId", sessionId)
-                        put("deviceId", sessionManager.getDeviceId())
-                        put("payload", org.json.JSONObject().apply {
-                            put("clipboard", clipboardJson)
-                        })
-                        put("timestamp", System.currentTimeMillis())
-                    }.toString())
-                }
+                webSocketManager.sendMessage(org.json.JSONObject().apply {
+                    put("type", "clipboard_broadcast")
+                    put("sessionId", sessionManager.getCurrentSessionId() ?: org.json.JSONObject.NULL)
+                    put("deviceId", sessionManager.getDeviceId())
+                    put("payload", org.json.JSONObject().apply {
+                        put("clipboard", clipboardJson)
+                        sessionManager.getPreferredTargetUsername()?.takeIf { it.isNotBlank() }?.let {
+                            put("targetUsername", it)
+                        }
+                    })
+                    put("timestamp", System.currentTimeMillis())
+                }.toString())
             } catch (e: Exception) {
                 android.util.Log.e("FlowLink", "Failed to send clipboard", e)
             }

@@ -5,10 +5,13 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.IBinder
+import android.net.Uri
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.flowlink.app.MainActivity
@@ -63,18 +66,37 @@ class InvitationListenerService : Service() {
     private var webSocket: WebSocket? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var notificationService: NotificationService
+    private lateinit var sessionManager: SessionManager
     
     private var username: String = ""
     private var deviceId: String = ""
     private var deviceName: String = ""
     
-    // Local backend
-    private val WS_URL = "ws://localhost:8080"
+    private val WS_URL = BackendConfig.WS_URL
+
+    private val clipboardReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != ClipboardSyncService.ACTION_CLIPBOARD_CHANGED) {
+                return
+            }
+
+            val text = intent.getStringExtra(ClipboardSyncService.EXTRA_TEXT)
+            val url = intent.getStringExtra(ClipboardSyncService.EXTRA_URL)
+            sendClipboardToDevices(text, url)
+        }
+    }
     
     override fun onCreate() {
         super.onCreate()
+        sessionManager = SessionManager(this)
         notificationService = NotificationService(this)
         createNotificationChannel()
+        val filter = IntentFilter(ClipboardSyncService.ACTION_CLIPBOARD_CHANGED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            registerReceiver(clipboardReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(clipboardReceiver, filter)
+        }
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -86,6 +108,7 @@ class InvitationListenerService : Service() {
                 
                 if (username.isNotEmpty() && deviceId.isNotEmpty()) {
                     startForeground(NOTIFICATION_ID, createForegroundNotification())
+                    startClipboardSync()
                     connectWebSocket()
                 }
             }
@@ -100,6 +123,10 @@ class InvitationListenerService : Service() {
     
     override fun onDestroy() {
         super.onDestroy()
+        try {
+            unregisterReceiver(clipboardReceiver)
+        } catch (_: Exception) {
+        }
         webSocket?.close(1000, "Service destroyed")
         scope.cancel()
     }
@@ -128,7 +155,7 @@ class InvitationListenerService : Service() {
         
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("FlowLink Active")
-            .setContentText("Ready to receive invitations")
+            .setContentText("Ready to sync clipboard and handoff events")
             .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -205,6 +232,54 @@ class InvitationListenerService : Service() {
                 "device_registered" -> {
                     Log.d("FlowLink", "Background device registered successfully")
                 }
+
+                "clipboard_sync" -> {
+                    val clipboardJson = json.getJSONObject("payload").optJSONObject("clipboard")
+                    if (clipboardJson != null) {
+                        val intent = Intent(this, ClipboardSyncService::class.java).apply {
+                            action = ClipboardSyncService.ACTION_UPDATE_CLIPBOARD
+                            putExtra(ClipboardSyncService.EXTRA_TEXT, clipboardJson.optString("text", "").ifBlank { null })
+                            putExtra(ClipboardSyncService.EXTRA_HTML, clipboardJson.optString("html", "").ifBlank { null })
+                            putExtra(ClipboardSyncService.EXTRA_IMAGE_DATA_URL, clipboardJson.optString("image", "").ifBlank { null })
+                            putExtra(ClipboardSyncService.EXTRA_URL, clipboardJson.optString("url", "").ifBlank { null })
+                        }
+                        startService(intent)
+                    }
+                }
+
+                "media_handoff_offer" -> {
+                    val payload = json.getJSONObject("payload")
+                    notificationService.showMediaHandoff(
+                        payload.optString("title", "Unknown Media"),
+                        payload.optString("url", ""),
+                        payload.optInt("timestamp", 0),
+                        payload.optString("platform", "Browser")
+                    )
+                }
+
+                "target_connection_request" -> {
+                    val payload = json.getJSONObject("payload")
+                    val sourceDeviceId = payload.optString("sourceDeviceId", "")
+                    val sourceUsername = payload.optString("sourceUsername", "Unknown")
+                    val sourceDeviceName = payload.optString("sourceDeviceName", "Unknown Device")
+
+                    sessionManager.setPreferredTargetUsername(sourceUsername)
+                    notificationService.showReceiverConnected(sourceUsername, sourceDeviceName)
+
+                    val ackMessage = JSONObject().apply {
+                        put("type", "target_connection_ack")
+                        put("deviceId", deviceId)
+                        put("sessionId", JSONObject.NULL)
+                        put("payload", JSONObject().apply {
+                            put("sourceDeviceId", sourceDeviceId)
+                            put("sourceUsername", sourceUsername)
+                            put("targetUsername", username)
+                            put("targetDeviceName", deviceName)
+                        })
+                        put("timestamp", System.currentTimeMillis())
+                    }
+                    webSocket?.send(ackMessage.toString())
+                }
                 
                 "session_invitation" -> {
                     Log.d("FlowLink", "📨 Background received session invitation")
@@ -243,5 +318,42 @@ class InvitationListenerService : Service() {
         } catch (e: Exception) {
             Log.e("FlowLink", "Error handling background message", e)
         }
+    }
+
+    private fun startClipboardSync() {
+        startService(Intent(this, ClipboardSyncService::class.java))
+        startService(Intent(this, ClipboardSyncService::class.java).apply {
+            action = ClipboardSyncService.ACTION_ENABLE
+        })
+    }
+
+    private fun sendClipboardToDevices(text: String?, url: String?) {
+        if (text.isNullOrBlank() && url.isNullOrBlank()) {
+            return
+        }
+
+        val payload = JSONObject().apply {
+            put("clipboard", JSONObject().apply {
+                if (!text.isNullOrBlank()) {
+                    put("text", text)
+                }
+                if (!url.isNullOrBlank()) {
+                    put("url", url)
+                }
+            })
+            sessionManager.getPreferredTargetUsername()?.takeIf { it.isNotBlank() }?.let {
+                put("targetUsername", it)
+            }
+        }
+
+        val message = JSONObject().apply {
+            put("type", "clipboard_broadcast")
+            put("deviceId", deviceId)
+            put("sessionId", JSONObject.NULL)
+            put("payload", payload)
+            put("timestamp", System.currentTimeMillis())
+        }
+
+        webSocket?.send(message.toString())
     }
 }
