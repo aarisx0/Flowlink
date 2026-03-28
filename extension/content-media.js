@@ -3,12 +3,18 @@
  * Detects video/audio playback and sends state changes to background script
  */
 
+if (window.__flowlinkMediaMonitorLoaded) {
+  console.log('🎬 FlowLink media detection already active on:', window.location.hostname);
+} else {
+  window.__flowlinkMediaMonitorLoaded = true;
+
 console.log('🎬 FlowLink media detection loaded on:', window.location.hostname);
 
 let currentVideo = null;
 let lastState = null;
 let checkInterval = null;
 let isExtensionValid = true;
+let lastSentFingerprint = '';
 
 // Check if extension context is valid
 function checkExtensionContext() {
@@ -18,7 +24,6 @@ function checkExtensionContext() {
   } catch (err) {
     if (!isExtensionValid) return false;
     isExtensionValid = false;
-    console.warn('⚠️ Extension reloaded. Please refresh this page.');
     return false;
   }
 }
@@ -29,17 +34,23 @@ function sendToBackground(message) {
   
   try {
     chrome.runtime.sendMessage(message, (response) => {
-      // Handle response or error
       if (chrome.runtime.lastError) {
-        console.warn('Message send error:', chrome.runtime.lastError.message);
-        if (chrome.runtime.lastError.message.includes('context invalidated')) {
+        const errorMessage = chrome.runtime.lastError.message || '';
+        if (
+          errorMessage.includes('context invalidated') ||
+          errorMessage.includes('Receiving end does not exist') ||
+          errorMessage.includes('Could not establish connection')
+        ) {
           isExtensionValid = false;
         }
       }
     });
   } catch (err) {
-    console.warn('Failed to send message:', err.message);
-    if (err.message.includes('context invalidated')) {
+    if (
+      err.message.includes('context invalidated') ||
+      err.message.includes('Receiving end does not exist') ||
+      err.message.includes('Could not establish connection')
+    ) {
       isExtensionValid = false;
     }
   }
@@ -104,6 +115,7 @@ function findVideoElement() {
 // Monitor video state
 function monitorVideo(video) {
   if (!video) return;
+  if (video === currentVideo) return;
   
   currentVideo = video;
   
@@ -154,21 +166,36 @@ function sendMediaState(state) {
     duration: Math.floor(currentVideo.duration),
     platform: getPlatform()
   };
+
+  const fingerprint = JSON.stringify([state, data.url, data.title, data.timestamp]);
+  if (fingerprint === lastSentFingerprint) {
+    return;
+  }
+  lastSentFingerprint = fingerprint;
   
   console.log('📤 Sending media state:', state, data.title);
-  
-  // Add retry logic for message sending
-  let retries = 0;
-  const maxRetries = 3;
-  
-  function trySend() {
-    sendToBackground({
-      type: 'media_state_changed',
-      data
-    });
+
+  sendToBackground({
+    type: 'media_state_changed',
+    data
+  });
+}
+
+function samplePlaybackState() {
+  const media = currentVideo || findVideoElement();
+  if (!media) return;
+
+  if (media !== currentVideo) {
+    monitorVideo(media);
   }
-  
-  trySend();
+
+  const state = media.paused ? 'paused' : 'playing';
+  if (state !== lastState) {
+    lastState = state;
+    if (!(state === 'paused' && media.ended)) {
+      sendMediaState(state);
+    }
+  }
 }
 
 // Initialize
@@ -205,7 +232,11 @@ function init() {
         monitorVideo(video);
       }
     }
+    samplePlaybackState();
   }, 2000);
+
+  window.addEventListener('focus', samplePlaybackState);
+  document.addEventListener('visibilitychange', samplePlaybackState);
 }
 
 // Wait for page to load
@@ -221,3 +252,4 @@ window.addEventListener('beforeunload', () => {
     clearInterval(checkInterval);
   }
 });
+}

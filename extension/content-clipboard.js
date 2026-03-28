@@ -14,6 +14,8 @@ let lastClipboardFingerprint = '';
 let lastClipboardTime = 0;
 let isExtensionValid = true;
 const DUPLICATE_WINDOW_MS = 2500;
+let clipboardPollTimer = null;
+let clipboardPollEnabled = false;
 
 // Check if extension context is valid
 function checkExtensionContext() {
@@ -217,13 +219,89 @@ async function captureClipboardEvent(source, clipboardData) {
   }
 }
 
+function scheduleClipboardSnapshot(source, delay = 150) {
+  if (!checkExtensionContext()) return;
+
+  window.clearTimeout(clipboardPollTimer);
+  clipboardPollTimer = window.setTimeout(() => {
+    captureClipboardEvent(source, null);
+  }, delay);
+}
+
+function shouldWatchClipboard() {
+  return document.visibilityState === 'visible' && document.hasFocus();
+}
+
+function startClipboardWatcher() {
+  if (clipboardPollEnabled) return;
+  clipboardPollEnabled = true;
+
+  const poll = async () => {
+    if (!clipboardPollEnabled || !checkExtensionContext()) {
+      clipboardPollEnabled = false;
+      return;
+    }
+
+    if (shouldWatchClipboard()) {
+      await captureClipboardEvent('clipboard_snapshot', null);
+    }
+
+    clipboardPollTimer = window.setTimeout(poll, 2200);
+  };
+
+  clipboardPollTimer = window.setTimeout(poll, 2200);
+}
+
+function stopClipboardWatcher() {
+  clipboardPollEnabled = false;
+  window.clearTimeout(clipboardPollTimer);
+}
+
 document.addEventListener('copy', (e) => {
   captureClipboardEvent('copy_event', e.clipboardData || null);
+  scheduleClipboardSnapshot('copy_snapshot', 180);
 });
 
 document.addEventListener('cut', (e) => {
   captureClipboardEvent('cut_event', e.clipboardData || null);
+  scheduleClipboardSnapshot('cut_snapshot', 180);
 });
+
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && ['c', 'x'].includes(e.key.toLowerCase())) {
+    scheduleClipboardSnapshot('keyboard_shortcut', 220);
+  }
+});
+
+document.addEventListener('click', (e) => {
+  const target = e.target instanceof Element ? e.target.closest('button,[role="button"],a') : null;
+  const label = (target?.textContent || target?.getAttribute?.('aria-label') || '').toLowerCase();
+  if (label.includes('copy') || label.includes('share') || label.includes('link')) {
+    scheduleClipboardSnapshot('button_copy', 260);
+  }
+}, true);
+
+document.addEventListener('visibilitychange', () => {
+  if (shouldWatchClipboard()) {
+    scheduleClipboardSnapshot('visibility_focus', 120);
+    startClipboardWatcher();
+  } else {
+    stopClipboardWatcher();
+  }
+});
+
+window.addEventListener('focus', () => {
+  scheduleClipboardSnapshot('window_focus', 120);
+  startClipboardWatcher();
+});
+
+window.addEventListener('blur', () => {
+  stopClipboardWatcher();
+});
+
+if (shouldWatchClipboard()) {
+  startClipboardWatcher();
+}
 
 console.log('✅ Clipboard monitoring active');
 }

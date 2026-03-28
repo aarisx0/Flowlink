@@ -45,7 +45,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     return;
   }
 
-  injectClipboardScript(tabId);
+  injectSupportedScripts(tabId, tab.url);
 });
 
 // Initialize extension function
@@ -119,6 +119,37 @@ function injectClipboardScript(tabId) {
   });
 }
 
+function isMediaSupportedUrl(url) {
+  return [
+    'youtube.com',
+    'netflix.com',
+    'open.spotify.com',
+    'twitch.tv',
+    'vimeo.com',
+    'dailymotion.com'
+  ].some((host) => url.includes(host));
+}
+
+function injectMediaScript(tabId) {
+  if (!chrome.scripting?.executeScript) {
+    return;
+  }
+
+  chrome.scripting.executeScript({
+    target: { tabId },
+    files: ['content-media.js']
+  }).catch(() => {
+    // Ignore restricted tabs or transient navigation failures.
+  });
+}
+
+function injectSupportedScripts(tabId, url) {
+  injectClipboardScript(tabId);
+  if (isMediaSupportedUrl(url)) {
+    injectMediaScript(tabId);
+  }
+}
+
 function injectClipboardScriptIntoTabs() {
   if (!chrome.tabs?.query) {
     return;
@@ -127,7 +158,7 @@ function injectClipboardScriptIntoTabs() {
   chrome.tabs.query({}, (tabs) => {
     for (const tab of tabs) {
       if (tab.id && tab.url && isInjectableUrl(tab.url)) {
-        injectClipboardScript(tab.id);
+        injectSupportedScripts(tab.id, tab.url);
       }
     }
   });
