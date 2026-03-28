@@ -4,7 +4,7 @@
  */
 
 // Configuration
-const BACKEND_URL = 'wss://sparkling-courtesy-production-1cb0.up.railway.app'; // Railway production (secure WebSocket)
+const BACKEND_URL = 'ws://localhost:8080';
 let ws = null;
 let deviceId = null;
 let username = null;
@@ -12,16 +12,52 @@ let isConnected = false;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 5;
 let connectionTimeout = null;
+let isInitializing = false;
+let lastClipboardFingerprint = null;
+let lastClipboardSyncedAt = 0;
+let lastMediaHandoffFingerprint = null;
+let lastMediaHandoffAt = 0;
+let lastClipboardSkipReason = null;
+let lastClipboardSkipAt = 0;
+let targetUsername = null;
+let lastTargetStatus = null;
 
 // Initialize extension
 chrome.runtime.onInstalled.addListener(() => {
   console.log('FlowLink extension installed');
-  
-  // Load saved settings
-  chrome.storage.local.get(['deviceId', 'username', 'settings'], (result) => {
-    console.log('Loaded from storage:', result);
-    
-    // ALWAYS ensure deviceId exists
+  injectClipboardScriptIntoTabs();
+  initializeExtension();
+});
+
+// Also connect on startup (when browser starts)
+chrome.runtime.onStartup.addListener(() => {
+  console.log('Browser started, initializing extension...');
+  injectClipboardScriptIntoTabs();
+  initializeExtension();
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status !== 'complete') {
+    return;
+  }
+
+  if (!tab?.url || !isInjectableUrl(tab.url)) {
+    return;
+  }
+
+  injectClipboardScript(tabId);
+});
+
+// Initialize extension function
+function initializeExtension() {
+  if (isInitializing) {
+    return;
+  }
+
+  isInitializing = true;
+
+  // FIRST: Ensure deviceId exists
+  chrome.storage.local.get(['deviceId'], (result) => {
     if (result.deviceId) {
       deviceId = result.deviceId;
       console.log('Using existing deviceId:', deviceId);
@@ -31,51 +67,70 @@ chrome.runtime.onInstalled.addListener(() => {
       console.log('Generated new deviceId:', deviceId);
     }
     
-    if (result.username) {
-      username = result.username;
-      console.log('Found existing user:', username);
-      connectWebSocket();
-    } else {
-      console.log('⚠️ No username found. Please set username in popup.');
-    }
-    
-    // Set default settings
-    if (!result.settings) {
-      chrome.storage.local.set({
-        settings: {
-          smartHandoff: true,
-          universalClipboard: true,
-          notifications: true
-        }
-      });
-      console.log('Set default settings');
-    }
-  });
-});
+    // THEN: Check for username and connect
+    chrome.storage.local.get(['username', 'targetUsername', 'settings'], (result) => {
+      console.log('Loaded from storage:', result);
+      targetUsername = result.targetUsername || null;
+      
+      if (result.username) {
+        username = result.username;
+        console.log('Found existing user:', username);
+        connectWebSocket();
+      } else {
+        console.log('⚠️ No username found. Please set username in popup.');
+      }
+      
+      // Set default settings
+      if (!result.settings) {
+        chrome.storage.local.set({
+          settings: {
+            smartHandoff: true,
+            universalClipboard: true,
+            notifications: true
+          }
+        });
+        console.log('Set default settings');
+      }
 
-// Also connect on startup (when browser starts)
-chrome.runtime.onStartup.addListener(() => {
-  console.log('Browser started, checking for saved username...');
-  chrome.storage.local.get(['deviceId', 'username'], (result) => {
-    // ALWAYS ensure deviceId exists
-    if (result.deviceId) {
-      deviceId = result.deviceId;
-    } else {
-      deviceId = generateDeviceId();
-      chrome.storage.local.set({ deviceId });
-    }
-    
-    if (result.username) {
-      username = result.username;
-      console.log('Reconnecting with username:', username);
-      connectWebSocket();
-    }
+      isInitializing = false;
+    });
   });
-});
+}
 
 // Generate unique device ID
 function generateDeviceId() {
   return `ext-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+}
+
+function isInjectableUrl(url) {
+  return /^https?:\/\//.test(url);
+}
+
+function injectClipboardScript(tabId) {
+  if (!chrome.scripting?.executeScript) {
+    return;
+  }
+
+  chrome.scripting.executeScript({
+    target: { tabId },
+    files: ['content-clipboard.js']
+  }).catch(() => {
+    // Ignore restricted tabs or transient navigation failures.
+  });
+}
+
+function injectClipboardScriptIntoTabs() {
+  if (!chrome.tabs?.query) {
+    return;
+  }
+
+  chrome.tabs.query({}, (tabs) => {
+    for (const tab of tabs) {
+      if (tab.id && tab.url && isInjectableUrl(tab.url)) {
+        injectClipboardScript(tab.id);
+      }
+    }
+  });
 }
 
 // WebSocket Connection
@@ -123,6 +178,19 @@ function connectWebSocket() {
         };
         console.log('📤 Sending registration:', registerMsg);
         sendMessage(registerMsg);
+
+        if (targetUsername) {
+          setTimeout(() => {
+            sendMessage({
+              type: 'target_connection_ping',
+              payload: {
+                targetUsername,
+                sourceUsername: username,
+                sourceDeviceName: 'Browser Extension'
+              }
+            });
+          }, 500);
+        }
       } else {
         console.warn('⚠️ No username set! Please open extension popup and set username.');
       }
@@ -180,27 +248,101 @@ function connectWebSocket() {
 // Send message to backend
 function sendMessage(message) {
   if (ws && ws.readyState === WebSocket.OPEN) {
-    message.timestamp = Date.now();
-    message.deviceId = deviceId; // Always set deviceId
-    
-    // Ensure deviceId is not null
-    if (!message.deviceId) {
-      console.error('❌ Cannot send message: deviceId is null!');
-      console.error('   Regenerating deviceId...');
-      deviceId = generateDeviceId();
-      chrome.storage.local.set({ deviceId });
-      message.deviceId = deviceId;
-    }
-    
-    const msgStr = JSON.stringify(message);
-    console.log('📤 Sending to backend:', message.type, message);
-    ws.send(msgStr);
+
+    const finalMessage = {
+      type: message.type,
+      deviceId: deviceId,
+      sessionId: null,
+      payload: message.payload || {},   // 🔥 ALWAYS ensure payload exists
+      timestamp: Date.now()
+    };
+
+    console.log('📤 Sending to backend:', finalMessage);
+    ws.send(JSON.stringify(finalMessage));
+    return true;
+
   } else {
-    console.error('❌ WebSocket not connected. Cannot send:', message.type);
-    console.error('   Connection state:', ws ? ws.readyState : 'null');
-    console.error('   Username:', username);
-    console.error('   Device ID:', deviceId);
+    return false;
   }
+}
+
+function logClipboardSkip(reason) {
+  const now = Date.now();
+  if (reason === lastClipboardSkipReason && now - lastClipboardSkipAt < 5000) {
+    return;
+  }
+
+  lastClipboardSkipReason = reason;
+  lastClipboardSkipAt = now;
+  console.warn(reason);
+}
+
+function normalizeClipboardPayload(clipboard = {}) {
+  const normalized = {
+    text: typeof clipboard.text === 'string' ? clipboard.text : '',
+    html: typeof clipboard.html === 'string' ? clipboard.html : '',
+    url: typeof clipboard.url === 'string' ? clipboard.url : '',
+    image: typeof clipboard.image === 'string' ? clipboard.image : '',
+    mimeType: typeof clipboard.mimeType === 'string' ? clipboard.mimeType : '',
+    sourceUrl: typeof clipboard.sourceUrl === 'string' ? clipboard.sourceUrl : '',
+    pageTitle: typeof clipboard.pageTitle === 'string' ? clipboard.pageTitle : ''
+  };
+
+  if (!normalized.url && normalized.text) {
+    try {
+      const parsed = new URL(normalized.text);
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        normalized.url = normalized.text;
+      }
+    } catch (_err) {
+      // Not a URL, ignore.
+    }
+  }
+
+  return normalized;
+}
+
+function getClipboardFingerprint(clipboard) {
+  return JSON.stringify([
+    clipboard.text || '',
+    clipboard.url || '',
+    clipboard.html || '',
+    clipboard.image ? clipboard.image.slice(0, 96) : '',
+    clipboard.mimeType || ''
+  ]);
+}
+
+function shouldSkipClipboard(clipboard) {
+  const fingerprint = getClipboardFingerprint(clipboard);
+  const now = Date.now();
+
+  if (fingerprint === lastClipboardFingerprint && now - lastClipboardSyncedAt < 2000) {
+    return true;
+  }
+
+  lastClipboardFingerprint = fingerprint;
+  lastClipboardSyncedAt = now;
+  return false;
+}
+
+function buildTimestampedMediaUrl(url, timestamp) {
+  if (!url || !timestamp || timestamp <= 0) {
+    return url;
+  }
+
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname.includes('youtube.com') || parsed.hostname === 'youtu.be') {
+      parsed.searchParams.set('t', Math.floor(timestamp).toString());
+      return parsed.toString();
+    }
+  } catch (_err) {
+    if (url.includes('youtube.com')) {
+      return `${url}${url.includes('?') ? '&' : '?'}t=${Math.floor(timestamp)}`;
+    }
+  }
+
+  return url;
 }
 
 // Handle incoming messages
@@ -236,6 +378,14 @@ function handleMessage(message) {
     case 'clipboard_sync':
       console.log('📋 Clipboard sync received:', message.payload);
       handleClipboardSync(message.payload);
+      break;
+
+    case 'target_connection_request':
+      handleTargetConnectionRequest(message.payload);
+      break;
+
+    case 'target_connection_result':
+      handleTargetConnectionResult(message.payload);
       break;
       
     case 'session_invitation':
@@ -297,11 +447,7 @@ chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) =
     chrome.storage.local.get([`handoff_${notificationId}`], (result) => {
       const data = result[`handoff_${notificationId}`];
       if (data) {
-        // Open URL with timestamp
-        let finalUrl = data.url;
-        if (data.timestamp && data.url.includes('youtube.com')) {
-          finalUrl += `${data.url.includes('?') ? '&' : '?'}t=${Math.floor(data.timestamp)}`;
-        }
+        const finalUrl = buildTimestampedMediaUrl(data.url, data.timestamp);
         chrome.tabs.create({ url: finalUrl });
         
         // Clean up
@@ -316,13 +462,18 @@ chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) =
 function handleClipboardSync(payload) {
   chrome.storage.local.get(['settings'], (result) => {
     if (!result.settings?.universalClipboard) return;
-    
-    const { text, image } = payload.clipboard;
-    
-    if (text) {
+
+    const clipboard = normalizeClipboardPayload(payload.clipboard);
+    if (shouldSkipClipboard(clipboard)) {
+      return;
+    }
+
+    const textToWrite = clipboard.text || clipboard.url;
+
+    if (textToWrite) {
       // Write text to clipboard
-      navigator.clipboard.writeText(text).then(() => {
-        console.log('Clipboard synced:', text.substring(0, 50));
+      navigator.clipboard.writeText(textToWrite).then(() => {
+        console.log('Clipboard synced:', textToWrite.substring(0, 50));
         
         // Show notification
         if (result.settings?.notifications) {
@@ -330,7 +481,7 @@ function handleClipboardSync(payload) {
             type: 'basic',
             iconUrl: 'icons/icon128.png',
             title: 'Clipboard Synced',
-            message: text.substring(0, 100) + (text.length > 100 ? '...' : ''),
+            message: textToWrite.substring(0, 100) + (textToWrite.length > 100 ? '...' : ''),
             priority: 0
           });
         }
@@ -339,59 +490,153 @@ function handleClipboardSync(payload) {
       });
     }
     
-    if (image) {
-      // Handle image clipboard (more complex)
-      console.log('Image clipboard sync not yet implemented');
+    if (clipboard.image && result.settings?.notifications) {
+      chrome.notifications.create({
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: 'Image Clipboard Synced',
+        message: clipboard.pageTitle || clipboard.sourceUrl || 'Image copied from another device',
+        priority: 0
+      });
     }
   });
 }
 
+function handleTargetConnectionRequest(payload) {
+  const sourceUsername = payload?.sourceUsername || 'Someone';
+  const sourceDeviceName = payload?.sourceDeviceName || 'Browser Extension';
+
+  chrome.notifications.create({
+    type: 'basic',
+    iconUrl: 'icons/icon128.png',
+    title: 'FlowLink Receiver Connected',
+    message: `${sourceUsername} connected to ${sourceDeviceName}`,
+    priority: 1
+  });
+
+  sendMessage({
+    type: 'target_connection_ack',
+    payload: {
+      sourceDeviceId: payload?.sourceDeviceId,
+      sourceUsername,
+      targetUsername: username,
+      targetDeviceName: 'Browser Extension'
+    }
+  });
+}
+
+function handleTargetConnectionResult(payload) {
+  lastTargetStatus = payload || null;
+
+  try {
+    chrome.runtime.sendMessage({
+      type: 'target_connection_result',
+      data: payload
+    });
+  } catch (_err) {
+    // Popup may be closed.
+  }
+
+  if (payload?.connected) {
+    chrome.notifications.create({
+      type: 'basic',
+      iconUrl: 'icons/icon128.png',
+      title: 'Receiver Available',
+      message: `${payload.targetUsername} is connected on ${payload.targetDeviceName || 'a device'}`,
+      priority: 0
+    });
+  }
+}
+
 // Listen for messages from content scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  // Handle messages synchronously - no async responses needed
+  console.log('📨 Received message from content script:', request.type);
   
-  switch (request.type) {
-    case 'media_state_changed':
-      handleMediaStateChanged(request.data, sender.tab);
-      return false; // Synchronous
-      
-    case 'clipboard_changed':
-      handleClipboardChanged(request.data);
-      return false; // Synchronous
-      
-    case 'get_connection_status':
-      sendResponse({ connected: isConnected, username });
-      return false; // Synchronous
-      
-    case 'set_username':
-      username = request.username;
-      chrome.storage.local.set({ username });
-      if (isConnected) {
-        // Re-register with new username
-        sendMessage({
-          type: 'device_register',
+  try {
+    switch (request.type) {
+      case 'media_state_changed':
+        handleMediaStateChanged(request.data, sender.tab);
+        sendResponse({ success: true });
+        break;
+        
+      case 'clipboard_changed':
+        handleClipboardChanged(request.data);
+        sendResponse({ success: true });
+        break;
+        
+      case 'get_connection_status':
+        sendResponse({ connected: isConnected, username, targetUsername, lastTargetStatus });
+        break;
+        
+      case 'set_username':
+        username = request.username;
+        chrome.storage.local.set({ username });
+        if (isConnected) {
+          // Re-register with new username
+          sendMessage({
+            type: 'device_register',
+            payload: {
+              deviceId,
+              deviceName: 'Browser Extension',
+              deviceType: 'browser',
+              username
+            }
+          });
+        } else {
+          connectWebSocket();
+        }
+        sendResponse({ success: true });
+        break;
+
+      case 'set_target_username':
+        targetUsername = request.targetUsername?.trim() || null;
+        chrome.storage.local.set({ targetUsername });
+        lastTargetStatus = targetUsername
+          ? { connected: false, pending: true, targetUsername }
+          : null;
+
+        if (!targetUsername) {
+          sendResponse({ success: true, targetUsername, status: lastTargetStatus });
+          break;
+        }
+
+        if (!isConnected) {
+          connectWebSocket();
+        }
+
+        const sent = sendMessage({
+          type: 'target_connection_ping',
           payload: {
-            deviceId,
-            deviceName: 'Browser Extension',
-            deviceType: 'browser',
-            username
+            targetUsername,
+            sourceUsername: username,
+            sourceDeviceName: 'Browser Extension'
           }
         });
-      } else {
-        connectWebSocket();
-      }
-      sendResponse({ success: true });
-      return false; // Synchronous
-      
-    case 'disconnect':
-      if (ws) {
-        ws.close();
-      }
-      sendResponse({ success: true });
-      return false; // Synchronous
+
+        sendResponse({
+          success: true,
+          targetUsername,
+          status: sent ? lastTargetStatus : { connected: false, pending: true, targetUsername }
+        });
+        break;
+        
+      case 'disconnect':
+        if (ws) {
+          ws.close();
+        }
+        sendResponse({ success: true });
+        break;
+        
+      default:
+        console.warn('Unknown message type:', request.type);
+        sendResponse({ success: false, error: 'Unknown message type' });
+    }
+  } catch (error) {
+    console.error('Error handling message:', error);
+    sendResponse({ success: false, error: error.message });
   }
   
-  return false; // Don't keep channel open
+  return true; // Keep channel open for async response
 });
 
 // Handle media state changes from content scripts
@@ -407,6 +652,14 @@ function handleMediaStateChanged(data, tab) {
     const { state, title, url, timestamp, platform } = data;
     
     if (state === 'paused') {
+      const mediaFingerprint = JSON.stringify([url || '', Math.floor(timestamp || 0), state]);
+      if (mediaFingerprint === lastMediaHandoffFingerprint && Date.now() - lastMediaHandoffAt < 8000) {
+        return;
+      }
+
+      lastMediaHandoffFingerprint = mediaFingerprint;
+      lastMediaHandoffAt = Date.now();
+
       console.log('⏸️ Media paused:', title);
       console.log('   Platform:', platform);
       console.log('   Timestamp:', timestamp);
@@ -421,7 +674,8 @@ function handleMediaStateChanged(data, tab) {
           url,
           timestamp,
           platform,
-          tabId: tab.id
+          tabId: tab.id,
+          targetUsername
         }
       };
       console.log('📤 Sending media handoff to backend...');
@@ -432,7 +686,28 @@ function handleMediaStateChanged(data, tab) {
 
 // Handle clipboard changes from content scripts
 function handleClipboardChanged(data) {
-  console.log('📋 Clipboard changed:', data.text?.substring(0, 50));
+  const clipboard = normalizeClipboardPayload(data);
+  if (shouldSkipClipboard(clipboard)) {
+    return;
+  }
+
+  if (!username) {
+    logClipboardSkip('⚠️ Clipboard skipped: set extension username first.');
+    return;
+  }
+
+  if (!isConnected) {
+    logClipboardSkip('⚠️ Clipboard skipped: backend WebSocket is not connected.');
+    connectWebSocket();
+    return;
+  }
+
+  console.log('📋 Clipboard changed:', {
+    hasText: Boolean(clipboard.text),
+    hasHtml: Boolean(clipboard.html),
+    hasImage: Boolean(clipboard.image),
+    url: clipboard.url || null
+  });
   
   chrome.storage.local.get(['settings'], (result) => {
     if (!result.settings?.universalClipboard) {
@@ -441,19 +716,36 @@ function handleClipboardChanged(data) {
     }
     
     console.log('📤 Sending clipboard to backend...');
-    
-    // Send to backend
-    sendMessage({
+
+    const sent = sendMessage({
       type: 'clipboard_broadcast',
       payload: {
-        clipboard: {
-          text: data.text,
-          image: data.image
-        }
+        clipboard,
+        targetUsername
       }
     });
+
+    if (!sent) {
+      logClipboardSkip('⚠️ Clipboard skipped: backend WebSocket is not connected.');
+    }
   });
 }
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'local') {
+    return;
+  }
+
+  if (changes.username?.newValue && changes.username.newValue !== username) {
+    username = changes.username.newValue;
+    reconnectAttempts = 0;
+    connectWebSocket();
+  }
+
+  if (Object.prototype.hasOwnProperty.call(changes, 'targetUsername')) {
+    targetUsername = changes.targetUsername?.newValue || null;
+  }
+});
 
 // Keep service worker alive
 if (chrome.alarms) {
@@ -471,3 +763,4 @@ if (chrome.alarms) {
 }
 
 console.log('FlowLink background service worker loaded');
+initializeExtension();

@@ -74,6 +74,9 @@ export default function DeviceTiles({
     sessionStorage.setItem('sessionId', session.id);
     sessionStorage.setItem('sessionCode', session.code);
     sessionStorage.setItem('deviceId', deviceId);
+    sessionStorage.setItem('username', username);
+    sessionStorage.setItem('deviceName', deviceName);
+    sessionStorage.setItem('deviceType', deviceType);
     
     // Use the App-level WebSocket instead of creating a new one
     const ws = (window as any).appWebSocket;

@@ -47,6 +47,7 @@ class WebSocketManager(private val mainActivity: MainActivity) {
     // Emits when session expires so UI can navigate back
     private val _sessionExpired = MutableStateFlow<Boolean>(false)
     val sessionExpired: StateFlow<Boolean> = _sessionExpired
+    private var remoteDesktopManager: RemoteDesktopManager? = null
 
     private fun resetDeviceConnectedEvent() {
         // StateFlow replays the latest value to new collectors (like SessionCreatedFragment).
@@ -67,10 +68,8 @@ class WebSocketManager(private val mainActivity: MainActivity) {
         val type: String
     )
 
-    // IMPORTANT: Railway production backend
-    // For Railway production: "wss://flowlink-production.up.railway.app"
-    // For local development: "ws://10.0.2.2:8080" (emulator) or "ws://YOUR_COMPUTER_IP:8080" (physical device)
-    private val WS_URL = "wss://sparkling-courtesy-production-1cb0.up.railway.app"
+    // Local backend
+    private val WS_URL = "ws://192.168.0.104:8080"
 
     fun connect(sessionCode: String) {
         try {
@@ -223,6 +222,10 @@ class WebSocketManager(private val mainActivity: MainActivity) {
         sendMessage(message)
     }
 
+    fun setRemoteDesktopManager(manager: RemoteDesktopManager?) {
+        remoteDesktopManager = manager
+    }
+
     private fun handleMessage(text: String) {
         try {
             val json = JSONObject(text)
@@ -262,7 +265,7 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                                 value is org.json.JSONObject -> value.toString()
                                 value is org.json.JSONArray -> value.toString()
                                 // For simple values, convert to string
-                                else -> value.toString()
+                                else -> value?.toString() ?: ""
                             }
                         }
                     }
@@ -278,18 +281,25 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     _receivedIntents.value = intent
                 }
                 "device_connected" -> {
-                    val deviceJson = json.getJSONObject("payload").getJSONObject("device")
+                    val payload = json.getJSONObject("payload")
+                    val deviceJson = payload.optJSONObject("device") ?: payload
                     val deviceInfo = DeviceInfo(
-                        id = deviceJson.getString("id"),
-                        name = deviceJson.getString("name"),
-                        type = deviceJson.getString("type")
+                        id = deviceJson.optString("id", ""),
+                        name = deviceJson.optString("name", deviceJson.optString("deviceName", "Unknown Device")),
+                        type = deviceJson.optString("type", deviceJson.optString("deviceType", "device"))
                     )
                     Log.d("FlowLink", "Received device_connected: ${deviceInfo.name} (${deviceInfo.id})")
                     Log.d("FlowLink", "  Current device ID: ${sessionManager.getDeviceId()}")
                     Log.d("FlowLink", "  Is self: ${deviceInfo.id == sessionManager.getDeviceId()}")
+
+                    try {
+                        mainActivity.notificationService.showDeviceConnected(deviceInfo.name, deviceInfo.type)
+                    } catch (e: Exception) {
+                        Log.e("FlowLink", "Failed to show device connected notification", e)
+                    }
                     
                     // Only emit if it's not the current device
-                    if (deviceInfo.id != sessionManager.getDeviceId()) {
+                    if (deviceInfo.id.isNotBlank() && deviceInfo.id != sessionManager.getDeviceId()) {
                         _deviceConnected.value = deviceInfo
                         Log.d("FlowLink", "  Emitted device_connected event")
                     } else {
@@ -331,7 +341,7 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     // locally generated sessionId with the real backend sessionId
                     // while preserving the original code. All future intent_send
                     // messages will then contain a valid sessionId.
-                    val backendSessionId = payload.optString("sessionId", null)
+                    val backendSessionId = payload.optString("sessionId")
                     if (!backendSessionId.isNullOrEmpty()) {
                         scope.launch {
                             val currentCode = sessionManager.getCurrentSessionCode() ?: ""
@@ -369,7 +379,7 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     Log.d("FlowLink", "Session joined, devices updated")
 
                     // Mark join as successful so UI can navigate
-                    val joinedSessionId = payload.optString("sessionId", null)
+                    val joinedSessionId = payload.optString("sessionId")
                     if (!joinedSessionId.isNullOrEmpty()) {
                         _sessionJoinState.value = SessionJoinState.Success(joinedSessionId)
                     } else {
@@ -402,17 +412,24 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                 "clipboard_sync" -> {
                     val clipboardJson = json.getJSONObject("payload").optJSONObject("clipboard")
                     if (clipboardJson != null) {
-                        val text = clipboardJson.optString("text", "")
-                        if (text.isNotEmpty()) {
-                            Log.d("FlowLink", "📋 Received clipboard from remote: ${text.take(50)}...")
-                            // Update clipboard via MainActivity
+                        val text = clipboardJson.optString("text", "").ifBlank { null }
+                        val html = clipboardJson.optString("html", "").ifBlank { null }
+                        val image = clipboardJson.optString("image", "").ifBlank { null }
+                        val url = clipboardJson.optString("url", "").ifBlank { null }
+
+                        if (text != null || html != null || image != null || url != null) {
+                            Log.d("FlowLink", "📋 Received clipboard from remote")
                             try {
-                                mainActivity.updateClipboardFromRemote(text)
+                                mainActivity.updateClipboardFromRemote(text, html, image, url)
                             } catch (e: Exception) {
                                 Log.e("FlowLink", "Failed to update clipboard", e)
                             }
                         }
                     }
+                }
+                "webrtc_offer", "webrtc_answer", "webrtc_ice_candidate" -> {
+                    remoteDesktopManager?.handleSignaling(json)
+                        ?: Log.w("FlowLink", "Received $type but no RemoteDesktopManager is active")
                 }
                 "media_handoff_offer" -> {
                     Log.d("FlowLink", "🎬 Received media handoff offer")
@@ -430,6 +447,35 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     } catch (e: Exception) {
                         Log.e("FlowLink", "Failed to show media handoff notification", e)
                     }
+                }
+                "target_connection_request" -> {
+                    Log.d("FlowLink", "📨 Received target connection request")
+                    val payload = json.getJSONObject("payload")
+                    val sourceDeviceId = payload.optString("sourceDeviceId", "")
+                    val sourceUsername = payload.optString("sourceUsername", "Unknown")
+                    val sourceDeviceName = payload.optString("sourceDeviceName", "Unknown Device")
+
+                    try {
+                        mainActivity.notificationService.showReceiverConnected(sourceUsername, sourceDeviceName)
+                    } catch (e: Exception) {
+                        Log.e("FlowLink", "Failed to show receiver connected notification", e)
+                    }
+
+                    sendMessage(JSONObject().apply {
+                        put("type", "target_connection_ack")
+                        put("deviceId", sessionManager.getDeviceId())
+                        put("sessionId", sessionManager.getCurrentSessionId())
+                        put("payload", JSONObject().apply {
+                            put("sourceDeviceId", sourceDeviceId)
+                            put("sourceUsername", sourceUsername)
+                            put("targetUsername", sessionManager.getUsername())
+                            put("targetDeviceName", sessionManager.getDeviceName())
+                        })
+                        put("timestamp", System.currentTimeMillis())
+                    }.toString())
+                }
+                "target_connection_result" -> {
+                    Log.d("FlowLink", "📨 Received target connection result")
                 }
                 "session_invitation" -> {
                     Log.d("FlowLink", "📨 Received session invitation")
@@ -469,22 +515,6 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                         } catch (e: Exception) {
                             Log.e("FlowLink", "Failed to show nearby session notification", e)
                         }
-                    }
-                }
-                "device_connected" -> {
-                    Log.d("FlowLink", "📱 Device connected notification received")
-                    val payload = json.getJSONObject("payload")
-                    val deviceName = payload.optString("deviceName", "Unknown Device")
-                    val deviceType = payload.optString("deviceType", "device")
-                    val username = payload.optString("username", "")
-                    
-                    Log.d("FlowLink", "Device: $deviceName ($deviceType) - User: $username")
-                    
-                    // Show notification
-                    try {
-                        mainActivity.notificationService.showDeviceConnected(deviceName, deviceType)
-                    } catch (e: Exception) {
-                        Log.e("FlowLink", "Failed to show device connected notification", e)
                     }
                 }
                 "invitation_response" -> {

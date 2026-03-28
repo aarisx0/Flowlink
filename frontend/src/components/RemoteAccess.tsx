@@ -40,6 +40,9 @@ export default function RemoteAccess() {
         const sessionCode = sessionStorage.getItem('sessionCode');
         const sessionId = sessionStorage.getItem('sessionId');
         const storedDeviceId = sessionStorage.getItem('deviceId');
+        const username = sessionStorage.getItem('username');
+        const deviceName = sessionStorage.getItem('deviceName') || 'Viewer';
+        const deviceType = sessionStorage.getItem('deviceType') || 'laptop';
         
         // Use stored deviceId if available (this should be the same deviceId from DeviceTiles)
         if (storedDeviceId) {
@@ -53,6 +56,11 @@ export default function RemoteAccess() {
         
         if (!storedDeviceId) {
           setError('Device ID not found. Please return to the main page and join a session first.');
+          return;
+        }
+
+        if (!username) {
+          setError('Username not found. Please return to the main page and rejoin the session.');
           return;
         }
         
@@ -81,15 +89,16 @@ export default function RemoteAccess() {
             // Join session with the same deviceId as DeviceTiles (stored in sessionStorage)
             // This ensures we're recognized as the same device, not a new one
             ws.send(JSON.stringify({
-              type: 'session_join',
-              payload: {
-                code: sessionCode,
-                deviceId: deviceIdRef.current, // Same deviceId as DeviceTiles
-                deviceName: 'Viewer',
-                deviceType: 'laptop',
-              },
-              timestamp: Date.now(),
-            }));
+                type: 'session_join',
+                payload: {
+                  code: sessionCode,
+                  deviceId: deviceIdRef.current, // Same deviceId as DeviceTiles
+                  deviceName,
+                  deviceType,
+                  username,
+                },
+                timestamp: Date.now(),
+              }));
             
             console.log('RemoteAccess: Sent session_join with deviceId:', deviceIdRef.current);
 

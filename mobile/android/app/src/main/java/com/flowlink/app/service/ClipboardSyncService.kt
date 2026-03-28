@@ -5,12 +5,16 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.IBinder
+import android.util.Base64
 import android.util.Log
+import androidx.core.content.FileProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import java.io.File
 
 /**
  * Background service to monitor clipboard changes and sync with other devices
@@ -67,8 +71,11 @@ class ClipboardSyncService : Service() {
             }
             ACTION_UPDATE_CLIPBOARD -> {
                 val text = intent.getStringExtra(EXTRA_TEXT)
-                if (text != null) {
-                    updateClipboard(text)
+                val html = intent.getStringExtra(EXTRA_HTML)
+                val imageDataUrl = intent.getStringExtra(EXTRA_IMAGE_DATA_URL)
+                val url = intent.getStringExtra(EXTRA_URL)
+                if (text != null || html != null || imageDataUrl != null || url != null) {
+                    updateClipboard(text, html, imageDataUrl, url)
                 }
             }
         }
@@ -84,12 +91,64 @@ class ClipboardSyncService : Service() {
         Log.d("FlowLink", "ClipboardSyncService destroyed")
     }
     
-    private fun updateClipboard(text: String) {
-        // Update local clipboard without triggering the listener
-        lastClipboardText = text
-        val clip = ClipData.newPlainText("FlowLink", text)
+    private fun updateClipboard(text: String?, html: String?, imageDataUrl: String?, url: String?) {
+        val textToCopy = text?.takeIf { it.isNotBlank() } ?: url?.takeIf { it.isNotBlank() }
+
+        if (!imageDataUrl.isNullOrBlank()) {
+            val imageUri = persistImageToCache(imageDataUrl)
+            if (imageUri != null) {
+                lastClipboardText = textToCopy ?: imageDataUrl.take(32)
+                val clip = ClipData.newUri(contentResolver, "FlowLink Image", imageUri)
+                clipboardManager?.setPrimaryClip(clip)
+                Log.d("FlowLink", "📋 Image clipboard updated from remote")
+                return
+            }
+        }
+
+        if (textToCopy.isNullOrBlank()) {
+            return
+        }
+
+        lastClipboardText = textToCopy
+        val clip = if (!html.isNullOrBlank()) {
+            ClipData.newHtmlText("FlowLink", textToCopy, html)
+        } else {
+            ClipData.newPlainText("FlowLink", textToCopy)
+        }
         clipboardManager?.setPrimaryClip(clip)
-        Log.d("FlowLink", "📋 Clipboard updated from remote: ${text.take(50)}...")
+        Log.d("FlowLink", "📋 Clipboard updated from remote: ${textToCopy.take(50)}...")
+    }
+
+    private fun persistImageToCache(dataUrl: String): Uri? {
+        return try {
+            val parts = dataUrl.split(",", limit = 2)
+            if (parts.size != 2) {
+                return null
+            }
+
+            val metadata = parts[0]
+            val encoded = parts[1]
+            val extension = when {
+                metadata.contains("image/png") -> "png"
+                metadata.contains("image/webp") -> "webp"
+                metadata.contains("image/gif") -> "gif"
+                else -> "jpg"
+            }
+
+            val bytes = Base64.decode(encoded, Base64.DEFAULT)
+            val clipboardDir = File(cacheDir, "clipboard")
+            if (!clipboardDir.exists()) {
+                clipboardDir.mkdirs()
+            }
+
+            val imageFile = File(clipboardDir, "clipboard_${System.currentTimeMillis()}.$extension")
+            imageFile.writeBytes(bytes)
+
+            FileProvider.getUriForFile(this, "$packageName.fileprovider", imageFile)
+        } catch (e: Exception) {
+            Log.e("FlowLink", "Failed to persist clipboard image", e)
+            null
+        }
     }
     
     private fun sendClipboardToDevices(text: String) {
@@ -119,5 +178,8 @@ class ClipboardSyncService : Service() {
         const val ACTION_UPDATE_CLIPBOARD = "com.flowlink.app.UPDATE_CLIPBOARD"
         const val ACTION_CLIPBOARD_CHANGED = "com.flowlink.app.CLIPBOARD_CHANGED"
         const val EXTRA_TEXT = "text"
+        const val EXTRA_HTML = "html"
+        const val EXTRA_IMAGE_DATA_URL = "image_data_url"
+        const val EXTRA_URL = "url"
     }
 }

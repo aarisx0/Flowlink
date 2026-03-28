@@ -213,14 +213,28 @@ class NotificationService(private val context: Context) {
         
         notificationManager.notify(NOTIFICATION_ID_GENERAL, notification)
     }
+
+    fun showReceiverConnected(sourceUsername: String, sourceDeviceName: String) {
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID_GENERAL)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("FlowLink Receiver Connected")
+            .setContentText("$sourceUsername connected to $sourceDeviceName")
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .build()
+
+        notificationManager.notify(NOTIFICATION_ID_GENERAL, notification)
+    }
     
     /**
      * Show media handoff notification
      */
     fun showMediaHandoff(title: String, url: String, timestamp: Int, platform: String) {
+        val finalUrl = buildTimestampedMediaUrl(url, timestamp)
+
         // Create intent to open the media URL
         val continueIntent = Intent(Intent.ACTION_VIEW).apply {
-            data = android.net.Uri.parse(url)
+            data = android.net.Uri.parse(finalUrl)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
         
@@ -254,6 +268,19 @@ class NotificationService(private val context: Context) {
         val minutes = seconds / 60
         val secs = seconds % 60
         return String.format("%d:%02d", minutes, secs)
+    }
+
+    private fun buildTimestampedMediaUrl(url: String, timestamp: Int): String {
+        if (timestamp <= 0) {
+            return url
+        }
+
+        return if (url.contains("youtube.com") || url.contains("youtu.be")) {
+            val separator = if (url.contains("?")) "&" else "?"
+            "$url${separator}t=$timestamp"
+        } else {
+            url
+        }
     }
     
     /**

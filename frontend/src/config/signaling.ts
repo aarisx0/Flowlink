@@ -3,13 +3,12 @@
  *
  * IMPORTANT:
  * - Never hardcode localhost in signaling URLs (breaks LAN + devices/emulators).
- * - Configure via Vite env: VITE_SIGNALING_URL (e.g. wss://flowlink-production.up.railway.app)
- * - Uses secure WebSocket (wss) for production Railway deployment
+ * - Configure via Vite env: VITE_SIGNALING_URL (e.g. ws://localhost:8080)
+ * - Defaults to the local backend on port 8080
  */
 function getSignalingWsUrl(): string {
   const envUrl = (import.meta as any)?.env?.VITE_SIGNALING_URL as string | undefined;
-  // Default to local development backend
-  return envUrl || 'wss://sparkling-courtesy-production-1cb0.up.railway.app';
+  return envUrl || 'ws://localhost:8080';
 }
 
 export const SIGNALING_WS_URL = getSignalingWsUrl();

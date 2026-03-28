@@ -68,8 +68,8 @@ class InvitationListenerService : Service() {
     private var deviceId: String = ""
     private var deviceName: String = ""
     
-    // Use localhost for emulator, change to actual IP for physical device
-    private val WS_URL = "ws://10.0.2.2:8080"
+    // Local backend
+    private val WS_URL = "ws://localhost:8080"
     
     override fun onCreate() {
         super.onCreate()

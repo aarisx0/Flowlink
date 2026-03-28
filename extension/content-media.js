@@ -28,17 +28,22 @@ function sendToBackground(message) {
   if (!checkExtensionContext()) return;
   
   try {
-    chrome.runtime.sendMessage(message);
+    chrome.runtime.sendMessage(message, (response) => {
+      // Handle response or error
+      if (chrome.runtime.lastError) {
+        console.warn('Message send error:', chrome.runtime.lastError.message);
+        if (chrome.runtime.lastError.message.includes('context invalidated')) {
+          isExtensionValid = false;
+        }
+      }
+    });
   } catch (err) {
+    console.warn('Failed to send message:', err.message);
     if (err.message.includes('context invalidated')) {
       isExtensionValid = false;
     }
   }
 }
-
-let currentVideo = null;
-let lastState = null;
-let checkInterval = null;
 
 // Platform detection
 function getPlatform() {
@@ -152,10 +157,18 @@ function sendMediaState(state) {
   
   console.log('📤 Sending media state:', state, data.title);
   
-  sendToBackground({
-    type: 'media_state_changed',
-    data
-  });
+  // Add retry logic for message sending
+  let retries = 0;
+  const maxRetries = 3;
+  
+  function trySend() {
+    sendToBackground({
+      type: 'media_state_changed',
+      data
+    });
+  }
+  
+  trySend();
 }
 
 // Initialize

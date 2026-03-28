@@ -6,6 +6,7 @@
   "permissions": [
     "tabs",
     "activeTab",
+    "scripting",
     "storage",
     "notifications",
     "clipboardRead",
@@ -35,7 +36,7 @@
     {
       "matches": ["<all_urls>"],
       "js": ["content-clipboard.js"],
-      "run_at": "document_start"
+      "run_at": "document_idle"
     }
   ],
   "action": {

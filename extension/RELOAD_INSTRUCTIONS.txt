@@ -1,0 +1,71 @@
+╔══════════════════════════════════════════════════════════════╗
+║          FLOWLINK EXTENSION - RELOAD INSTRUCTIONS            ║
+╚══════════════════════════════════════════════════════════════╝
+
+🔧 FIXES APPLIED:
+  ✅ Fixed "Could not establish connection" error
+  ✅ Fixed duplicate variable declarations
+  ✅ Added proper error handling for message passing
+  ✅ Improved extension context validation
+  ✅ Better connection status handling
+
+📋 RELOAD STEPS:
+
+1. Open Chrome Extensions Page
+   → Type in address bar: chrome://extensions/
+   → Or: Menu → More Tools → Extensions
+
+2. Find "FlowLink - Cross-Device Continuity"
+   → Look for the FlowLink icon
+
+3. Click the RELOAD button
+   → It's the circular arrow icon on the extension card
+   → Wait for reload to complete (1-2 seconds)
+
+4. Verify No Errors
+   → Check the extension card for any red error messages
+   → Should show "Service worker (Active)" or similar
+
+5. Open Extension Popup
+   → Click the FlowLink icon in browser toolbar
+   → Should show "Connected" with green dot
+   → If not connected, logout and login again
+
+6. Check Background Console (Optional)
+   → Click "Service worker" link on extension card
+   → Should see: "✅ Connected to FlowLink backend"
+   → Should see: "✅ Device registered successfully!"
+
+7. Test Features
+   → Copy some text → Should sync to other devices
+   → Open YouTube and pause video → Should get handoff notification
+
+🔍 TROUBLESHOOTING:
+
+If still seeing errors:
+  1. Close ALL browser tabs with FlowLink content
+  2. Reload extension again
+  3. Open a fresh tab and test
+
+If not connecting:
+  1. Check username is set in popup
+  2. Verify backend is running (check health endpoint)
+  3. Try logout and login again
+
+If features not working:
+  1. Open popup and check all toggles are ON
+  2. Check background console for errors
+  3. Verify same username on all devices
+
+📱 MOBILE APP:
+  → Should receive "Browser Extension connected" notification
+  → Make sure using SAME username
+  → Check WebSocket connection status
+
+🌐 WEB APP:
+  → Open: https://flowlink-weld.vercel.app
+  → Login with same username
+  → Should see browser extension in device list
+
+✨ ALL DONE!
+   Your extension should now work without errors.

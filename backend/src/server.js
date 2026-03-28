@@ -152,6 +152,14 @@ wss.on('connection', (ws, req) => {
         case 'clipboard_broadcast':
           handleClipboardBroadcast(ws, message);
           break;
+
+        case 'target_connection_ping':
+          handleTargetConnectionPing(ws, message);
+          break;
+
+        case 'target_connection_ack':
+          handleTargetConnectionAck(ws, message);
+          break;
           
         case 'group_create':
           handleGroupCreate(ws, message);
@@ -983,7 +991,7 @@ function handleDeviceConnectedNotification(ws, message) {
  */
 function handleMediaHandoff(ws, message) {
   const { sessionId, deviceId } = message;
-  const { action, title, url, timestamp, platform } = message.payload;
+  const { action, title, url, timestamp, platform, targetUsername } = message.payload;
 
   console.log(`handleMediaHandoff: Device ${deviceId} - ${action} on ${platform}: ${title}`);
 
@@ -1009,10 +1017,12 @@ function handleMediaHandoff(ws, message) {
     }
   }
 
-  // If not in session, broadcast to all devices with same username
+  // If not in session, broadcast to target username or fall back to sender username
   const senderDevice = globalDevices.get(deviceId);
   if (senderDevice && senderDevice.device.username) {
-    const username = senderDevice.device.username;
+    const username = typeof targetUsername === 'string' && targetUsername.trim()
+      ? targetUsername.trim()
+      : senderDevice.device.username;
     console.log(`Broadcasting media handoff to all devices with username: ${username}`);
 
     for (const [targetDeviceId, deviceEntry] of globalDevices.entries()) {
@@ -1047,7 +1057,7 @@ function handleMediaHandoff(ws, message) {
  */
 function handleClipboardBroadcast(ws, message) {
   const { sessionId, deviceId } = message;
-  const { clipboard } = message.payload;
+  const { clipboard, targetUsername } = message.payload;
 
   console.log(`handleClipboardBroadcast: Device ${deviceId} broadcasting clipboard`);
 
@@ -1069,10 +1079,12 @@ function handleClipboardBroadcast(ws, message) {
     }
   }
 
-  // If not in session, broadcast to all devices with same username
+  // If not in session, broadcast to target username or fall back to sender username
   const senderDevice = globalDevices.get(deviceId);
   if (senderDevice && senderDevice.device.username) {
-    const username = senderDevice.device.username;
+    const username = typeof targetUsername === 'string' && targetUsername.trim()
+      ? targetUsername.trim()
+      : senderDevice.device.username;
     console.log(`Broadcasting clipboard to all devices with username: ${username}`);
 
     for (const [targetDeviceId, deviceEntry] of globalDevices.entries()) {
@@ -1096,6 +1108,101 @@ function handleClipboardBroadcast(ws, message) {
       }
     }
   }
+}
+
+function getOpenConnectionsForUsername(targetUsername, excludeDeviceId = null) {
+  const matches = [];
+
+  for (const [targetDeviceId, deviceEntry] of globalDevices.entries()) {
+    if (targetDeviceId === excludeDeviceId) continue;
+    if (deviceEntry.device.username !== targetUsername) continue;
+
+    for (const targetWs of deviceEntry.connections) {
+      if (targetWs.readyState === targetWs.OPEN) {
+        matches.push({ targetDeviceId, deviceEntry, targetWs });
+      }
+    }
+  }
+
+  return matches;
+}
+
+function handleTargetConnectionPing(ws, message) {
+  const { deviceId } = message;
+  const { targetUsername, sourceUsername, sourceDeviceName } = message.payload || {};
+
+  if (!targetUsername) {
+    sendError(ws, 'Missing targetUsername');
+    return;
+  }
+
+  const matches = getOpenConnectionsForUsername(targetUsername.trim(), deviceId);
+
+  if (matches.length === 0) {
+    ws.send(JSON.stringify({
+      type: 'target_connection_result',
+      deviceId,
+      payload: {
+        connected: false,
+        targetUsername: targetUsername.trim()
+      },
+      timestamp: Date.now()
+    }));
+    return;
+  }
+
+  for (const { targetDeviceId, targetWs, deviceEntry } of matches) {
+    targetWs.send(JSON.stringify({
+      type: 'target_connection_request',
+      deviceId: targetDeviceId,
+      payload: {
+        sourceDeviceId: deviceId,
+        sourceUsername: sourceUsername || globalDevices.get(deviceId)?.device.username || 'Unknown',
+        sourceDeviceName: sourceDeviceName || globalDevices.get(deviceId)?.device.name || 'Unknown Device',
+        targetUsername: deviceEntry.device.username,
+        targetDeviceName: deviceEntry.device.name
+      },
+      timestamp: Date.now()
+    }));
+  }
+
+  ws.send(JSON.stringify({
+    type: 'target_connection_result',
+    deviceId,
+    payload: {
+      connected: true,
+      targetUsername: targetUsername.trim(),
+      targetDeviceName: matches[0].deviceEntry.device.name,
+      targetDeviceId: matches[0].targetDeviceId
+    },
+    timestamp: Date.now()
+  }));
+}
+
+function handleTargetConnectionAck(ws, message) {
+  const { deviceId } = message;
+  const { sourceDeviceId, sourceUsername, targetUsername, targetDeviceName } = message.payload || {};
+
+  if (!sourceDeviceId) {
+    return;
+  }
+
+  const sourceWs = deviceConnections.get(sourceDeviceId);
+  if (!sourceWs || sourceWs.readyState !== sourceWs.OPEN) {
+    return;
+  }
+
+  sourceWs.send(JSON.stringify({
+    type: 'target_connection_result',
+    deviceId: sourceDeviceId,
+    payload: {
+      connected: true,
+      targetUsername: targetUsername || globalDevices.get(deviceId)?.device.username || '',
+      targetDeviceName: targetDeviceName || globalDevices.get(deviceId)?.device.name || 'Unknown Device',
+      sourceUsername: sourceUsername || ''
+    },
+    timestamp: Date.now()
+  }));
 }
 
 /**

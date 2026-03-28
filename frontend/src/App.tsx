@@ -170,6 +170,75 @@ function App() {
           });
         }
         break;
+
+      case 'device_connected':
+        // Handle device connected notification (from extension or other devices)
+        console.log('📱 Device connected notification:', message.payload);
+        const connectedDevice = message.payload;
+        if (invitationServiceRef.current && connectedDevice.deviceName) {
+          invitationServiceRef.current.notificationService.showToast({
+            type: 'info',
+            title: 'Device Connected',
+            message: `${connectedDevice.deviceName} is now online`,
+            duration: 3000,
+          });
+        }
+        break;
+
+      case 'media_handoff_offer':
+        // Handle media handoff from extension or other devices
+        console.log('🎬 Media handoff offer:', message.payload);
+        const mediaOffer = message.payload;
+        if (invitationServiceRef.current && mediaOffer.title && mediaOffer.url) {
+          const timestamp = mediaOffer.timestamp || 0;
+          const timestampText = timestamp > 0 ? ` at ${Math.floor(timestamp / 60)}:${(timestamp % 60).toString().padStart(2, '0')}` : '';
+          
+          let finalUrl = mediaOffer.url;
+          // Add timestamp for YouTube videos
+          if (timestamp > 0 && mediaOffer.url.includes('youtube.com')) {
+            finalUrl += `${mediaOffer.url.includes('?') ? '&' : '?'}t=${Math.floor(timestamp)}`;
+          }
+          
+          invitationServiceRef.current.notificationService.showToast({
+            type: 'info',
+            title: `Continue watching on ${mediaOffer.platform || 'this device'}?`,
+            message: `${mediaOffer.title}${timestampText}`,
+            duration: 10000,
+            actions: [
+              { id: 'open', label: 'Open', action: 'accept' as const },
+              { id: 'dismiss', label: 'Dismiss', action: 'dismiss' as const }
+            ],
+            onAction: (actionId: string) => {
+              if (actionId === 'open') {
+                window.open(finalUrl, '_blank');
+              }
+            }
+          });
+        }
+        break;
+
+      case 'clipboard_sync':
+        // Handle clipboard sync from extension or other devices
+        console.log('📋 Clipboard sync:', message.payload);
+        const clipboardData = message.payload.clipboard;
+        const clipboardText = clipboardData?.text || clipboardData?.url;
+        if (clipboardText) {
+          // Copy to clipboard
+          navigator.clipboard.writeText(clipboardText).then(() => {
+            console.log('Clipboard synced:', clipboardText.substring(0, 50));
+            if (invitationServiceRef.current) {
+              invitationServiceRef.current.notificationService.showToast({
+                type: 'success',
+                title: 'Clipboard Synced',
+                message: clipboardText.substring(0, 100) + (clipboardText.length > 100 ? '...' : ''),
+                duration: 3000,
+              });
+            }
+          }).catch(err => {
+            console.error('Failed to write to clipboard:', err);
+          });
+        }
+        break;
     }
   };
 

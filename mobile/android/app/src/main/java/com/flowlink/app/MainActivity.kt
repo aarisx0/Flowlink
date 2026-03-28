@@ -1,6 +1,7 @@
 package com.flowlink.app
 
 import android.Manifest
+import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -8,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -21,6 +23,7 @@ import com.flowlink.app.BuildConfig
 import com.flowlink.app.databinding.ActivityMainBinding
 import com.flowlink.app.model.Intent as FlowIntent
 import com.flowlink.app.service.ClipboardSyncService
+import com.flowlink.app.service.ScreenCaptureService
 import com.flowlink.app.service.SessionManager
 import com.flowlink.app.service.WebSocketManager
 import com.flowlink.app.service.InvitationListenerService
@@ -43,6 +46,7 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
     lateinit var webSocketManager: WebSocketManager
     lateinit var notificationService: NotificationService
     private var clipboardSyncEnabled = false
+    private var pendingScreenShareViewerDeviceId: String? = null
     
     private val clipboardReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -82,6 +86,45 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
         }
     }
 
+    private val screenCaptureLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val viewerDeviceId = pendingScreenShareViewerDeviceId
+        pendingScreenShareViewerDeviceId = null
+
+        if (viewerDeviceId.isNullOrBlank()) {
+            return@registerForActivityResult
+        }
+
+        if (result.resultCode != Activity.RESULT_OK || result.data == null) {
+            Toast.makeText(this, "Screen sharing permission denied", Toast.LENGTH_SHORT).show()
+            return@registerForActivityResult
+        }
+
+        val sessionId = sessionManager.getCurrentSessionId()
+        if (sessionId.isNullOrBlank()) {
+            Toast.makeText(this, "Not in a session", Toast.LENGTH_SHORT).show()
+            return@registerForActivityResult
+        }
+
+        val foregroundIntent = Intent(this, ScreenCaptureService::class.java).apply {
+            action = ScreenCaptureService.ACTION_START_FOREGROUND
+        }
+        ContextCompat.startForegroundService(this, foregroundIntent)
+
+        val captureIntent = Intent(this, ScreenCaptureService::class.java).apply {
+            action = ScreenCaptureService.ACTION_START_CAPTURE
+            putExtra(ScreenCaptureService.EXTRA_RESULT_CODE, result.resultCode)
+            putExtra(ScreenCaptureService.EXTRA_DATA, result.data)
+            putExtra(ScreenCaptureService.EXTRA_SESSION_ID, sessionId)
+            putExtra(ScreenCaptureService.EXTRA_SOURCE_DEVICE_ID, sessionManager.getDeviceId())
+            putExtra(ScreenCaptureService.EXTRA_VIEWER_DEVICE_ID, viewerDeviceId)
+        }
+        startService(captureIntent)
+
+        Toast.makeText(this, "Screen sharing started", Toast.LENGTH_SHORT).show()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -91,6 +134,7 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
         sessionManager = SessionManager(this)
         webSocketManager = WebSocketManager(this)
         notificationService = NotificationService(this)
+        (application as? FlowLinkApplication)?.initWebSocketManager(webSocketManager)
         
         // Check if username is set, show dialog if not
         if (!sessionManager.hasUsername()) {
@@ -829,39 +873,16 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
 
     private fun startScreenSharing(viewerDeviceId: String) {
         android.util.Log.d("FlowLink", "Starting screen sharing for viewer: $viewerDeviceId")
-        
-        // Send WebRTC offer message to initiate screen sharing
-        // Note: Full MediaProjection implementation would capture actual screen frames
-        // For now, we send the signaling message so the viewer knows sharing started
+
         val sessionId = sessionManager.getCurrentSessionId()
         if (sessionId == null) {
             Toast.makeText(this, "Not in a session", Toast.LENGTH_SHORT).show()
             return
         }
-        
-        // Create a basic WebRTC offer structure
-        // In a full implementation, this would come from PeerConnection.createOffer()
-        val offerJson = org.json.JSONObject().apply {
-            put("type", "offer")
-            put("sdp", "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n")
-            // This is a minimal SDP - full implementation would use WebRTC PeerConnection
-        }
-        
-        // Send WebRTC offer via WebSocket
-        webSocketManager.sendMessage(org.json.JSONObject().apply {
-            put("type", "webrtc_offer")
-            put("sessionId", sessionId)
-            put("deviceId", sessionManager.getDeviceId())
-            put("payload", org.json.JSONObject().apply {
-                put("toDevice", viewerDeviceId)
-                put("data", offerJson)
-                put("purpose", "remote_desktop")
-            })
-            put("timestamp", System.currentTimeMillis())
-        }.toString())
-        
-        Toast.makeText(this, "Screen sharing started", Toast.LENGTH_SHORT).show()
-        android.util.Log.d("FlowLink", "Sent WebRTC offer for screen sharing")
+
+        pendingScreenShareViewerDeviceId = viewerDeviceId
+        val mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        screenCaptureLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
     }
     
     override fun onDestroy() {
@@ -933,10 +954,13 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
         }
     }
     
-    fun updateClipboardFromRemote(text: String) {
+    fun updateClipboardFromRemote(text: String?, html: String? = null, imageDataUrl: String? = null, url: String? = null) {
         val intent = Intent(this, ClipboardSyncService::class.java)
         intent.action = ClipboardSyncService.ACTION_UPDATE_CLIPBOARD
         intent.putExtra(ClipboardSyncService.EXTRA_TEXT, text)
+        intent.putExtra(ClipboardSyncService.EXTRA_HTML, html)
+        intent.putExtra(ClipboardSyncService.EXTRA_IMAGE_DATA_URL, imageDataUrl)
+        intent.putExtra(ClipboardSyncService.EXTRA_URL, url)
         startService(intent)
     }
 

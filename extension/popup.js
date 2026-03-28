@@ -8,10 +8,13 @@ let setupScreen, mainScreen, statusDot, statusText;
 let usernameInput, setupBtn;
 let userName, smartHandoffToggle, clipboardToggle, notificationsToggle;
 let activityList, openWebAppBtn, logoutBtn;
+let receiverUsernameInput, saveReceiverBtn, receiverStatus;
 
 // State
 let isConnected = false;
 let currentUsername = null;
+let currentReceiverUsername = null;
+let lastTargetStatus = null;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -32,6 +35,9 @@ document.addEventListener('DOMContentLoaded', () => {
   activityList = document.getElementById('activityList');
   openWebAppBtn = document.getElementById('openWebAppBtn');
   logoutBtn = document.getElementById('logoutBtn');
+  receiverUsernameInput = document.getElementById('receiverUsernameInput');
+  saveReceiverBtn = document.getElementById('saveReceiverBtn');
+  receiverStatus = document.getElementById('receiverStatus');
   
   // Load saved data
   loadUserData();
@@ -45,6 +51,10 @@ document.addEventListener('DOMContentLoaded', () => {
   smartHandoffToggle.addEventListener('change', handleSettingChange);
   clipboardToggle.addEventListener('change', handleSettingChange);
   notificationsToggle.addEventListener('change', handleSettingChange);
+  saveReceiverBtn.addEventListener('click', handleReceiverSave);
+  receiverUsernameInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') handleReceiverSave();
+  });
   
   openWebAppBtn.addEventListener('click', () => {
     chrome.tabs.create({ url: 'https://flowlink-weld.vercel.app' });
@@ -56,24 +66,36 @@ document.addEventListener('DOMContentLoaded', () => {
   chrome.runtime.onMessage.addListener((message) => {
     if (message.type === 'connection_status') {
       updateConnectionStatus(message.connected);
+    } else if (message.type === 'target_connection_result') {
+      lastTargetStatus = message.data || null;
+      updateReceiverUI();
     }
   });
   
   // Request current connection status
   chrome.runtime.sendMessage({ type: 'get_connection_status' }, (response) => {
+    if (chrome.runtime.lastError) {
+      console.error('Error getting connection status:', chrome.runtime.lastError.message);
+      updateConnectionStatus(false);
+      return;
+    }
+    
     if (response) {
       updateConnectionStatus(response.connected);
       if (response.username) {
         currentUsername = response.username;
         userName.textContent = response.username;
       }
+      currentReceiverUsername = response.targetUsername || null;
+      lastTargetStatus = response.lastTargetStatus || null;
+      updateReceiverUI();
     }
   });
 });
 
 // Load user data from storage
 function loadUserData() {
-  chrome.storage.local.get(['username', 'settings'], (result) => {
+  chrome.storage.local.get(['username', 'targetUsername', 'settings'], (result) => {
     if (result.username) {
       // User is logged in
       currentUsername = result.username;
@@ -83,6 +105,9 @@ function loadUserData() {
       // Show setup screen
       showSetupScreen();
     }
+
+    currentReceiverUsername = result.targetUsername || null;
+    updateReceiverUI();
     
     // Load settings
     if (result.settings) {
@@ -112,6 +137,12 @@ function handleSetup() {
     type: 'set_username', 
     username 
   }, (response) => {
+    if (chrome.runtime.lastError) {
+      console.error('Error setting username:', chrome.runtime.lastError.message);
+      alert('Failed to connect. Please reload the extension and try again.');
+      return;
+    }
+    
     if (response && response.success) {
       currentUsername = username;
       userName.textContent = username;
@@ -126,15 +157,65 @@ function handleSetup() {
 function handleLogout() {
   if (confirm('Are you sure you want to logout?')) {
     // Disconnect
-    chrome.runtime.sendMessage({ type: 'disconnect' });
-    
-    // Clear storage
-    chrome.storage.local.remove(['username', 'deviceId'], () => {
-      currentUsername = null;
-      usernameInput.value = '';
-      showSetupScreen();
+    chrome.runtime.sendMessage({ type: 'disconnect' }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.warn('Error disconnecting:', chrome.runtime.lastError.message);
+      }
+      
+      // Clear storage regardless of disconnect result
+      chrome.storage.local.remove(['username', 'deviceId', 'targetUsername'], () => {
+        currentUsername = null;
+        currentReceiverUsername = null;
+        usernameInput.value = '';
+        showSetupScreen();
+      });
     });
   }
+}
+
+function handleReceiverSave() {
+  const targetUsername = receiverUsernameInput.value.trim();
+
+  chrome.runtime.sendMessage({ type: 'set_target_username', targetUsername }, (response) => {
+    if (chrome.runtime.lastError) {
+      console.error('Error saving receiver username:', chrome.runtime.lastError.message);
+      alert('Failed to save receiver username.');
+      return;
+    }
+
+    if (!response?.success) {
+      alert(response?.error || 'Failed to save receiver username.');
+      return;
+    }
+
+    currentReceiverUsername = targetUsername || null;
+    lastTargetStatus = response.status || (targetUsername ? { pending: true, connected: false, targetUsername } : null);
+    updateReceiverUI();
+  });
+}
+
+function updateReceiverUI() {
+  if (!receiverUsernameInput || !receiverStatus) return;
+
+  receiverUsernameInput.value = currentReceiverUsername || '';
+
+  if (!currentReceiverUsername) {
+    receiverStatus.textContent = 'No receiver selected';
+    return;
+  }
+
+  if (lastTargetStatus?.pending) {
+    receiverStatus.textContent = `Checking ${currentReceiverUsername}...`;
+    return;
+  }
+
+  if (lastTargetStatus?.connected) {
+    const targetDeviceName = lastTargetStatus.targetDeviceName || 'device';
+    receiverStatus.textContent = `${currentReceiverUsername} connected on ${targetDeviceName}`;
+    return;
+  }
+
+  receiverStatus.textContent = `Sending to ${currentReceiverUsername}`;
 }
 
 // Handle setting changes

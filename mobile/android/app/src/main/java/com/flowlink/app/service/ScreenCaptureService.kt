@@ -109,6 +109,7 @@ class ScreenCaptureService : Service() {
                 viewerDeviceId,
                 true
             )
+            webSocketManager.setRemoteDesktopManager(remoteDesktopManager)
             
             // Start screen share IMMEDIATELY with the Intent
             // This is the critical part - we're in the service context now
@@ -137,6 +138,11 @@ class ScreenCaptureService : Service() {
     
     private fun stopScreenCapture() {
         Log.d(TAG, "Stopping screen capture")
+        try {
+            (application as? com.flowlink.app.FlowLinkApplication)?.webSocketManager?.setRemoteDesktopManager(null)
+        } catch (e: Exception) {
+            Log.w(TAG, "WebSocketManager not available during cleanup")
+        }
         remoteDesktopManager?.cleanup()
         remoteDesktopManager = null
     }

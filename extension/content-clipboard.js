@@ -3,11 +3,17 @@
  * Detects copy events and syncs clipboard across devices
  */
 
+if (window.__flowlinkClipboardMonitorLoaded) {
+  console.log('FlowLink clipboard monitoring already active');
+} else {
+  window.__flowlinkClipboardMonitorLoaded = true;
+
 console.log('FlowLink clipboard monitoring loaded');
 
-let lastClipboardText = '';
+let lastClipboardFingerprint = '';
 let lastClipboardTime = 0;
 let isExtensionValid = true;
+const DUPLICATE_WINDOW_MS = 2500;
 
 // Check if extension context is valid
 function checkExtensionContext() {
@@ -17,7 +23,6 @@ function checkExtensionContext() {
   } catch (err) {
     if (!isExtensionValid) return false; // Already logged
     isExtensionValid = false;
-    console.warn('⚠️ Extension context invalidated. Please refresh this page.');
     return false;
   }
 }
@@ -27,154 +32,198 @@ function sendToBackground(message) {
   if (!checkExtensionContext()) return;
   
   try {
-    chrome.runtime.sendMessage(message);
+    chrome.runtime.sendMessage(message, () => {
+      if (chrome.runtime.lastError) {
+        const errorMessage = chrome.runtime.lastError.message || '';
+        if (
+          errorMessage.includes('context invalidated') ||
+          errorMessage.includes('Receiving end does not exist') ||
+          errorMessage.includes('Could not establish connection')
+        ) {
+          isExtensionValid = false;
+        }
+      }
+    });
   } catch (err) {
-    if (err.message.includes('context invalidated')) {
+    if (
+      err.message.includes('context invalidated') ||
+      err.message.includes('Receiving end does not exist') ||
+      err.message.includes('Could not establish connection')
+    ) {
       isExtensionValid = false;
     }
   }
 }
 
-// Monitor copy events
-document.addEventListener('copy', async (e) => {
-  if (!checkExtensionContext()) return;
-  
+function getSelectionText() {
+  const selection = window.getSelection();
+  return selection ? selection.toString().trim() : '';
+}
+
+function isUrl(value) {
+  if (!value) return false;
   try {
-    // Small delay to ensure clipboard is populated
-    setTimeout(async () => {
-      try {
-        // Read from clipboard
-        const text = await navigator.clipboard.readText();
-        
-        // Avoid duplicate sends
-        if (text === lastClipboardText && Date.now() - lastClipboardTime < 1000) {
-          return;
-        }
-        
-        lastClipboardText = text;
-        lastClipboardTime = Date.now();
-        
-        console.log('📋 Clipboard copied:', text.substring(0, 50));
-        
-        // Send to background script
-        sendToBackground({
-          type: 'clipboard_changed',
-          data: {
-            text,
-            source: 'copy_event'
-          }
-        });
-      } catch (err) {
-        if (err.message.includes('context invalidated')) {
-          isExtensionValid = false;
-        } else {
-          console.error('Failed to read clipboard:', err);
-        }
-      }
-    }, 100);
-  } catch (err) {
-    console.error('Copy event error:', err);
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch (_err) {
+    return false;
   }
-});
+}
 
-// Monitor cut events
-document.addEventListener('cut', async (e) => {
-  if (!checkExtensionContext()) return;
-  
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function readClipboardSnapshot() {
+  const snapshot = {
+    text: '',
+    html: '',
+    url: '',
+    image: '',
+    mimeType: ''
+  };
+
   try {
-    setTimeout(async () => {
-      try {
-        const text = await navigator.clipboard.readText();
-        
-        if (text === lastClipboardText && Date.now() - lastClipboardTime < 1000) {
-          return;
+    if (navigator.clipboard.read) {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        if (!snapshot.text && item.types.includes('text/plain')) {
+          const blob = await item.getType('text/plain');
+          snapshot.text = (await blob.text()).trim();
         }
-        
-        lastClipboardText = text;
-        lastClipboardTime = Date.now();
-        
-        console.log('✂️ Clipboard cut:', text.substring(0, 50));
-        
-        sendToBackground({
-          type: 'clipboard_changed',
-          data: {
-            text,
-            source: 'cut_event'
-          }
-        });
-      } catch (err) {
-        if (!err.message.includes('context invalidated')) {
-          console.error('Failed to read clipboard:', err);
+
+        if (!snapshot.html && item.types.includes('text/html')) {
+          const blob = await item.getType('text/html');
+          snapshot.html = await blob.text();
+        }
+
+        const imageType = item.types.find((type) => type.startsWith('image/'));
+        if (!snapshot.image && imageType) {
+          const blob = await item.getType(imageType);
+          snapshot.image = await blobToDataUrl(blob);
+          snapshot.mimeType = imageType;
         }
       }
-    }, 100);
-  } catch (err) {
-    console.error('Cut event error:', err);
-  }
-});
+    }
 
-// Keyboard shortcut monitoring (Ctrl+C, Cmd+C)
-document.addEventListener('keydown', async (e) => {
-  if (!checkExtensionContext()) return;
-  
-  // Check for Ctrl+C or Cmd+C
-  if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
-    setTimeout(async () => {
-      try {
-        const text = await navigator.clipboard.readText();
-        
-        if (text === lastClipboardText && Date.now() - lastClipboardTime < 1000) {
-          return;
+    if (!snapshot.text && navigator.clipboard.readText) {
+      snapshot.text = (await navigator.clipboard.readText()).trim();
+    }
+  } catch (_err) {
+    // Clipboard reads can fail when the document is not focused.
+  }
+
+  if (!snapshot.url && isUrl(snapshot.text)) {
+    snapshot.url = snapshot.text;
+  }
+
+  return snapshot;
+}
+
+async function buildClipboardPayload(source, clipboardData) {
+  const payload = {
+    text: clipboardData?.getData('text/plain')?.trim() || '',
+    html: clipboardData?.getData('text/html') || '',
+    url: clipboardData?.getData('text/uri-list')?.trim() || '',
+    image: '',
+    mimeType: '',
+    source,
+    sourceUrl: window.location.href,
+    pageTitle: document.title
+  };
+
+  if (!payload.text && clipboardData) {
+    payload.text = getSelectionText();
+  }
+
+  if (clipboardData?.items) {
+    for (const item of clipboardData.items) {
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          payload.image = await blobToDataUrl(file);
+          payload.mimeType = item.type;
+          break;
         }
-        
-        lastClipboardText = text;
-        lastClipboardTime = Date.now();
-        
-        console.log('⌨️ Clipboard (keyboard):', text.substring(0, 50));
-        
-        sendToBackground({
-          type: 'clipboard_changed',
-          data: {
-            text,
-            source: 'keyboard_shortcut'
-          }
-        });
-      } catch (err) {
-        // Silently fail - clipboard might not be accessible
       }
-    }, 100);
+    }
   }
-});
 
-// Periodic clipboard check (fallback for apps that don't trigger events)
-let lastCheckedText = '';
-const clipboardCheckInterval = setInterval(async () => {
-  if (!checkExtensionContext()) {
-    clearInterval(clipboardCheckInterval);
+  if (!clipboardData) {
+    const snapshot = await readClipboardSnapshot();
+    payload.text = payload.text || snapshot.text;
+    payload.html = payload.html || snapshot.html;
+    payload.url = payload.url || snapshot.url;
+    payload.image = payload.image || snapshot.image;
+    payload.mimeType = payload.mimeType || snapshot.mimeType;
+  }
+
+  if (!payload.url && isUrl(payload.text)) {
+    payload.url = payload.text;
+  }
+
+  return payload;
+}
+
+function fingerprintClipboard(payload) {
+  return JSON.stringify([
+    payload.text || '',
+    payload.url || '',
+    payload.html || '',
+    payload.image ? payload.image.slice(0, 96) : '',
+    payload.mimeType || ''
+  ]);
+}
+
+function sendClipboardPayload(payload) {
+  const hasData = payload.text || payload.url || payload.html || payload.image;
+  if (!hasData) return;
+
+  const fingerprint = fingerprintClipboard(payload);
+  if (fingerprint === lastClipboardFingerprint && Date.now() - lastClipboardTime < DUPLICATE_WINDOW_MS) {
     return;
   }
-  
+
+  lastClipboardFingerprint = fingerprint;
+  lastClipboardTime = Date.now();
+
+  console.log('📋 Clipboard captured:', {
+    source: payload.source,
+    hasText: Boolean(payload.text),
+    hasHtml: Boolean(payload.html),
+    hasImage: Boolean(payload.image),
+    url: payload.url || null
+  });
+
+  sendToBackground({
+    type: 'clipboard_changed',
+    data: payload
+  });
+}
+
+async function captureClipboardEvent(source, clipboardData) {
+  if (!checkExtensionContext()) return;
+
   try {
-    const text = await navigator.clipboard.readText();
-    
-    if (text && text !== lastCheckedText && text !== lastClipboardText) {
-      lastCheckedText = text;
-      lastClipboardText = text;
-      lastClipboardTime = Date.now();
-      
-      console.log('🔄 Clipboard (periodic check):', text.substring(0, 50));
-      
-      sendToBackground({
-        type: 'clipboard_changed',
-        data: {
-          text,
-          source: 'periodic_check'
-        }
-      });
-    }
+    const payload = await buildClipboardPayload(source, clipboardData);
+    sendClipboardPayload(payload);
   } catch (err) {
-    // Silently fail - clipboard might not be accessible
+    console.error('Clipboard capture error:', err);
   }
-}, 2000); // Check every 2 seconds
+}
+
+document.addEventListener('copy', (e) => {
+  captureClipboardEvent('copy_event', e.clipboardData || null);
+});
+
+document.addEventListener('cut', (e) => {
+  captureClipboardEvent('cut_event', e.clipboardData || null);
+});
 
 console.log('✅ Clipboard monitoring active');
+}
