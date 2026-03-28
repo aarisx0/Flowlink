@@ -42,6 +42,21 @@ const deviceConnections = new Map();
 // Structure: deviceId -> { device: DeviceInfo, connections: Set<WebSocket>, lastSeen: timestamp }
 const globalDevices = new Map();
 
+// Clipboard dedupe cache to prevent repeated sends
+// Structure: deviceId|username -> { fingerprint: string, timestamp: number }
+const clipboardDedupeCache = new Map();
+const CLIPBOARD_DEDUPE_TTL_MS = 5000; // 5 second dedupe window
+
+// Cleanup old clipboard dedupe entries periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of clipboardDedupeCache.entries()) {
+    if (now - entry.timestamp > CLIPBOARD_DEDUPE_TTL_MS) {
+      clipboardDedupeCache.delete(key);
+    }
+  }
+}, 10000); // Cleanup every 10 seconds
+
 // Create HTTP server for health checks
 const server = createServer((req, res) => {
   if (req.url === '/health') {
@@ -1051,6 +1066,32 @@ function handleClipboardBroadcast(ws, message) {
 
   console.log(`handleClipboardBroadcast: Device ${deviceId} broadcasting clipboard`);
 
+  // Create fingerprint for dedupe
+  const clipboardFingerprint = JSON.stringify([
+    clipboard?.text || '',
+    clipboard?.url || '',
+    clipboard?.html || '',
+    clipboard?.image ? clipboard.image.slice(0, 96) : ''
+  ]);
+  
+  // Get sender device for username
+  const senderDevice = globalDevices.get(deviceId);
+  const username = targetUsername && typeof targetUsername === 'string' 
+    ? targetUsername.trim()
+    : senderDevice?.device.username;
+  
+  const dedupeKey = `${deviceId}|${username}`;
+  const cacheEntry = clipboardDedupeCache.get(dedupeKey);
+  
+  // Skip if same fingerprint was sent recently
+  if (cacheEntry && cacheEntry.fingerprint === clipboardFingerprint && Date.now() - cacheEntry.timestamp < CLIPBOARD_DEDUPE_TTL_MS) {
+    console.log(`[DEDUPE] Skipping duplicate clipboard from ${deviceId} - sent within 5s`);
+    return;
+  }
+  
+  // Update dedupe cache
+  clipboardDedupeCache.set(dedupeKey, { fingerprint: clipboardFingerprint, timestamp: Date.now() });
+
   // If device is in a session, broadcast to session devices
   if (sessionId) {
     const session = sessions.get(sessionId);
@@ -1070,11 +1111,7 @@ function handleClipboardBroadcast(ws, message) {
   }
 
   // If not in session, broadcast to target username or fall back to sender username
-  const senderDevice = globalDevices.get(deviceId);
-  if (senderDevice && senderDevice.device.username) {
-    const username = typeof targetUsername === 'string' && targetUsername.trim()
-      ? targetUsername.trim()
-      : senderDevice.device.username;
+  if (senderDevice && username) {
     console.log(`Broadcasting clipboard to all devices with username: ${username}`);
 
     for (const [targetDeviceId, deviceEntry] of globalDevices.entries()) {

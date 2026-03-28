@@ -15,6 +15,7 @@ let lastState = null;
 let checkInterval = null;
 let isExtensionValid = true;
 let lastSentFingerprint = '';
+let lastKnownUrl = window.location.href;
 
 // Check if extension context is valid
 function checkExtensionContext() {
@@ -62,6 +63,12 @@ function getPlatform() {
   if (hostname.includes('youtube.com')) return 'YouTube';
   if (hostname.includes('netflix.com')) return 'Netflix';
   if (hostname.includes('spotify.com')) return 'Spotify';
+  if (hostname.includes('whatsapp.com')) return 'WhatsApp';
+  if (hostname.includes('instagram.com')) return 'Instagram';
+  if (hostname.includes('jiosaavn.com')) return 'JioSaavn';
+  if (hostname.includes('gaana.com')) return 'Gaana';
+  if (hostname.includes('isaidub')) return 'iSaiDub';
+  if (hostname.includes('moviesda')) return 'Moviesda';
   if (hostname.includes('twitch.tv')) return 'Twitch';
   if (hostname.includes('vimeo.com')) return 'Vimeo';
   if (hostname.includes('dailymotion.com')) return 'Dailymotion';
@@ -83,7 +90,28 @@ function getVideoTitle() {
              document.title;
     
     case 'Spotify':
+      // Try multiple Spotify selectors
       return document.querySelector('[data-testid="now-playing-widget"] a')?.textContent ||
+             document.querySelector('a[href*="/track/"]')?.textContent ||
+             document.querySelector('[data-testid="context-item-link"]')?.textContent ||
+             document.title;
+
+    case 'WhatsApp':
+      return document.querySelector('[data-testid="conversation-info-header-chat-title"]')?.textContent ||
+             document.querySelector('[title]')?.getAttribute('title') ||
+             document.title;
+
+    case 'Instagram':
+      // Check for video in feed or story
+      return document.querySelector('article h1, article header h2, span.x1iyjqo2')?.textContent || 
+             document.querySelector('a[href*="/stories/"]')?.textContent ||
+             document.title;
+
+    case 'JioSaavn':
+    case 'Gaana':
+      // Music player title
+      return document.querySelector('[class*="song-title"], [class*="track-name"], h1')?.textContent || 
+             document.querySelector('span[title]')?.getAttribute('title') ||
              document.title;
     
     case 'Twitch':
@@ -99,15 +127,62 @@ function getVideoTitle() {
   }
 }
 
-// Find video element
+// Find video/audio element with multiple strategies
 function findVideoElement() {
-  // Try to find video element
-  const video = document.querySelector('video');
-  if (video) return video;
+  const platform = getPlatform();
   
-  // Try to find audio element
-  const audio = document.querySelector('audio');
-  if (audio) return audio;
+  // Strategy 1: Direct media element search
+  let mediaElements = Array.from(document.querySelectorAll('video, audio'));
+  let candidate = mediaElements.find((element) => {
+    const media = element;
+    return media.currentSrc || media.src || !media.paused || media.readyState > 0;
+  });
+  if (candidate) return candidate;
+  
+  // Strategy 2: Platform-specific searches
+  switch (platform) {
+    case 'Spotify':
+      // Check Spotify player state via mediaSession or look for active player
+      if (navigator.mediaSession?.playbackState) {
+        // Create a synthetic object for Spotify
+        return {
+          paused: navigator.mediaSession.playbackState !== 'playing',
+          currentTime: 0,
+          duration: 0,
+          _isSpotifyMediaSession: true
+        };
+      }
+      break;
+      
+    case 'Instagram':
+      // Look for video in feed or stories (nested in containers)
+      candidate = document.querySelector('.x1yztbdb video, [role="article"] video, video[style*="display"]');
+      if (candidate) return candidate;
+      break;
+      
+    case 'JioSaavn':
+    case 'Gaana':
+      // Music player video/audio
+      candidate = document.querySelector('[class*="player"] video, [class*="player"] audio, .player video, .player audio');
+      if (candidate) return candidate;
+      // Also check for hidden audio
+      candidate = document.querySelector('audio[style*="display:none"], audio[hidden]');
+      if (candidate) return candidate;
+      break;
+      
+    case 'WhatsApp':
+      // Video call or media playback
+      candidate = document.querySelector('[data-testid="video-stream"] video, video[id*="call"], video[id*="stream"]');
+      if (candidate) return candidate;
+      break;
+      
+    case 'iSaiDub':
+    case 'Moviesda':
+      // Movie player
+      candidate = document.querySelector('.video-player video, [class*="video-container"] video, video[controls]');
+      if (candidate) return candidate;
+      break;
+  }
   
   return null;
 }
@@ -119,16 +194,23 @@ function monitorVideo(video) {
   
   currentVideo = video;
   
-  // Listen for play event
+  // Handle synthetic Spotify mediaSession object
+  if (video._isSpotifyMediaSession) {
+    console.log('📱 Monitoring Spotify via mediaSession');
+    setupSpotifyMediaSessionListeners();
+    return;
+  }
+  
+  // Real media element listeners
   video.addEventListener('play', () => {
-    console.log('Video playing');
+    console.log('▶️ Video playing');
     lastState = 'playing';
     sendMediaState('playing');
   });
   
   // Listen for pause event
   video.addEventListener('pause', () => {
-    console.log('Video paused');
+    console.log('⏸️ Video paused');
     
     // Ignore if video ended
     if (video.ended) return;
@@ -144,13 +226,31 @@ function monitorVideo(video) {
   
   // Listen for ended event
   video.addEventListener('ended', () => {
-    console.log('Video ended');
+    console.log('🏁 Video ended');
     lastState = 'ended';
   });
   
   // Listen for seeking (timestamp change)
   video.addEventListener('seeked', () => {
-    console.log('Video seeked to:', video.currentTime);
+    console.log('📍 Video seeked to:', video.currentTime);
+  });
+}
+
+// Setup Spotify mediaSession listeners for pause/play events
+function setupSpotifyMediaSessionListeners() {
+  if (!navigator.mediaSession) return;
+  
+  // These handlers get called when user presses play/pause controls
+  navigator.mediaSession.setActionHandler('play', () => {
+    console.log('🎵 Spotify play action triggered');
+    lastState = 'playing';
+    sendMediaState('playing');
+  });
+  
+  navigator.mediaSession.setActionHandler('pause', () => {
+    console.log('🎵 Spotify pause action triggered');
+    lastState = 'paused';
+    sendMediaState('paused');
   });
 }
 
@@ -183,16 +283,30 @@ function sendMediaState(state) {
 
 function samplePlaybackState() {
   const media = currentVideo || findVideoElement();
-  if (!media) return;
+  const mediaSessionState = navigator.mediaSession?.playbackState;
 
-  if (media !== currentVideo) {
+  if (!media && !mediaSessionState) return;
+
+  if (media && media !== currentVideo) {
     monitorVideo(media);
   }
 
-  const state = media.paused ? 'paused' : 'playing';
+  // Determine current state with fallbacks
+  let state;
+  if (media?._isSpotifyMediaSession || mediaSessionState) {
+    // Use mediaSession state as primary for Spotify
+    state = mediaSessionState === 'playing' ? 'playing' : 'paused';
+  } else if (media) {
+    // Use real media element state
+    state = media.paused ? 'paused' : 'playing';
+  } else {
+    return;
+  }
+  
+  // Check if state changed
   if (state !== lastState) {
     lastState = state;
-    if (!(state === 'paused' && media.ended)) {
+    if (!(state === 'paused' && media?.ended)) {
       sendMediaState(state);
     }
   }
@@ -200,7 +314,7 @@ function samplePlaybackState() {
 
 // Initialize
 function init() {
-  console.log('Initializing media detection on:', getPlatform());
+  console.log('🎬 Initializing media detection on:', getPlatform());
   
   // Find video immediately
   const video = findVideoElement();
@@ -208,12 +322,18 @@ function init() {
     monitorVideo(video);
   }
   
+  // Also setup Spotify mediaSession listeners even if no media element found
+  const platform = getPlatform();
+  if (platform === 'Spotify' && navigator.mediaSession) {
+    setupSpotifyMediaSessionListeners();
+  }
+  
   // Watch for dynamically added videos (SPA navigation)
   const observer = new MutationObserver(() => {
     if (!currentVideo || !document.contains(currentVideo)) {
       const video = findVideoElement();
       if (video && video !== currentVideo) {
-        console.log('New video element detected');
+        console.log('🆕 New media element detected');
         monitorVideo(video);
       }
     }
@@ -224,16 +344,28 @@ function init() {
     subtree: true
   });
   
-  // Periodic check for video element (fallback)
+  // Periodic check for video element with faster polling (1500ms for better responsiveness)
   checkInterval = setInterval(() => {
     if (!currentVideo || !document.contains(currentVideo)) {
       const video = findVideoElement();
-      if (video) {
+      if (video && video !== currentVideo) {
+        console.log('🔄 Media element reacquired via polling');
         monitorVideo(video);
       }
     }
+    
+    // Detect URL/SPA navigation changes
+    if (window.location.href !== lastKnownUrl) {
+      console.log('🗺️ URL changed, resetting media state');
+      lastKnownUrl = window.location.href;
+      currentVideo = null;
+      lastState = null;
+      samplePlaybackState();
+    }
+    
+    // Always sample state - critical for Spotify and other non-DOM media
     samplePlaybackState();
-  }, 2000);
+  }, 1500);
 
   window.addEventListener('focus', samplePlaybackState);
   document.addEventListener('visibilitychange', samplePlaybackState);

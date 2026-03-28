@@ -22,14 +22,7 @@
   },
   "content_scripts": [
     {
-      "matches": [
-        "https://www.youtube.com/*",
-        "https://www.netflix.com/*",
-        "https://open.spotify.com/*",
-        "https://www.twitch.tv/*",
-        "https://vimeo.com/*",
-        "https://www.dailymotion.com/*"
-      ],
+      "matches": ["<all_urls>"],
       "js": ["content-media.js"],
       "run_at": "document_idle"
     },

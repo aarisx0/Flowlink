@@ -124,6 +124,13 @@ function isMediaSupportedUrl(url) {
     'youtube.com',
     'netflix.com',
     'open.spotify.com',
+    'instagram.com',
+    'jiosaavn.com',
+    'gaana.com',
+    'isaidub',
+    'moviesda',
+    'web.whatsapp.com',
+    'whatsapp.com',
     'twitch.tv',
     'vimeo.com',
     'dailymotion.com'
@@ -145,9 +152,7 @@ function injectMediaScript(tabId) {
 
 function injectSupportedScripts(tabId, url) {
   injectClipboardScript(tabId);
-  if (isMediaSupportedUrl(url)) {
-    injectMediaScript(tabId);
-  }
+  injectMediaScript(tabId);
 }
 
 function injectClipboardScriptIntoTabs() {

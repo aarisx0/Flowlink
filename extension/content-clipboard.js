@@ -13,9 +13,10 @@ console.log('FlowLink clipboard monitoring loaded');
 let lastClipboardFingerprint = '';
 let lastClipboardTime = 0;
 let isExtensionValid = true;
-const DUPLICATE_WINDOW_MS = 2500;
+const DUPLICATE_WINDOW_MS = 30000;
 let clipboardPollTimer = null;
 let clipboardPollEnabled = false;
+let clipboardPollDeadline = 0;
 
 // Check if extension context is valid
 function checkExtensionContext() {
@@ -187,7 +188,7 @@ function sendClipboardPayload(payload) {
   if (!hasData) return;
 
   const fingerprint = fingerprintClipboard(payload);
-  if (fingerprint === lastClipboardFingerprint && Date.now() - lastClipboardTime < DUPLICATE_WINDOW_MS) {
+  if (fingerprint === lastClipboardFingerprint) {
     return;
   }
 
@@ -222,10 +223,12 @@ async function captureClipboardEvent(source, clipboardData) {
 function scheduleClipboardSnapshot(source, delay = 150) {
   if (!checkExtensionContext()) return;
 
+  clipboardPollDeadline = Date.now() + 8000;
   window.clearTimeout(clipboardPollTimer);
   clipboardPollTimer = window.setTimeout(() => {
     captureClipboardEvent(source, null);
   }, delay);
+  startClipboardWatcher();
 }
 
 function shouldWatchClipboard() {
@@ -242,6 +245,11 @@ function startClipboardWatcher() {
       return;
     }
 
+    if (Date.now() > clipboardPollDeadline) {
+      stopClipboardWatcher();
+      return;
+    }
+
     if (shouldWatchClipboard()) {
       await captureClipboardEvent('clipboard_snapshot', null);
     }
@@ -249,7 +257,8 @@ function startClipboardWatcher() {
     clipboardPollTimer = window.setTimeout(poll, 2200);
   };
 
-  clipboardPollTimer = window.setTimeout(poll, 2200);
+  // Start with 1200ms delay, stop after 8s
+  clipboardPollTimer = window.setTimeout(poll, 1200);
 }
 
 function stopClipboardWatcher() {
@@ -284,7 +293,6 @@ document.addEventListener('click', (e) => {
 document.addEventListener('visibilitychange', () => {
   if (shouldWatchClipboard()) {
     scheduleClipboardSnapshot('visibility_focus', 120);
-    startClipboardWatcher();
   } else {
     stopClipboardWatcher();
   }
@@ -292,16 +300,11 @@ document.addEventListener('visibilitychange', () => {
 
 window.addEventListener('focus', () => {
   scheduleClipboardSnapshot('window_focus', 120);
-  startClipboardWatcher();
 });
 
 window.addEventListener('blur', () => {
   stopClipboardWatcher();
 });
-
-if (shouldWatchClipboard()) {
-  startClipboardWatcher();
-}
 
 console.log('✅ Clipboard monitoring active');
 }

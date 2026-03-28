@@ -23,6 +23,8 @@ class ClipboardSyncService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var clipboardManager: ClipboardManager? = null
     private var lastClipboardText: String = ""
+    private var lastRemoteFingerprint: String = ""
+    private var lastRemoteAppliedAt: Long = 0L
     private var isEnabled = false
     
     private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
@@ -94,7 +96,19 @@ class ClipboardSyncService : Service() {
     }
     
     private fun updateClipboard(text: String?, html: String?, imageDataUrl: String?, url: String?) {
-        val textToCopy = text?.takeIf { it.isNotBlank() } ?: url?.takeIf { it.isNotBlank() }
+        val remoteFingerprint = listOf(text ?: "", html ?: "", imageDataUrl?.take(64) ?: "", url ?: "").joinToString("|")
+        if (remoteFingerprint == lastRemoteFingerprint && System.currentTimeMillis() - lastRemoteAppliedAt < 30000) {
+            Log.d("FlowLink", "📋 Ignoring duplicate clipboard sync (same fingerprint within 30s)")
+            return
+        }
+
+        lastRemoteFingerprint = remoteFingerprint
+        lastRemoteAppliedAt = System.currentTimeMillis()
+
+        val effectiveUrl = url?.takeIf { it.isNotBlank() }
+            ?: text?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+
+        val textToCopy = text?.takeIf { it.isNotBlank() } ?: effectiveUrl
 
         if (!imageDataUrl.isNullOrBlank()) {
             val imageUri = persistImageToCache(imageDataUrl)
@@ -120,13 +134,10 @@ class ClipboardSyncService : Service() {
         clipboardManager?.setPrimaryClip(clip)
         Log.d("FlowLink", "📋 Clipboard updated from remote: ${textToCopy.take(50)}...")
 
-        if (!url.isNullOrBlank()) {
+        if (!effectiveUrl.isNullOrBlank()) {
             try {
-                val openIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                startActivity(openIntent)
-                Log.d("FlowLink", "🌐 Opened URL from remote clipboard: $url")
+                openUrl(effectiveUrl)
+                Log.d("FlowLink", "🌐 Opened URL from remote clipboard: $effectiveUrl")
             } catch (e: Exception) {
                 Log.e("FlowLink", "Failed to open URL from remote clipboard", e)
             }
@@ -178,6 +189,18 @@ class ClipboardSyncService : Service() {
         val candidate = itemUri?.toString()?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
             ?: text.takeIf { it.startsWith("http://") || it.startsWith("https://") }
         return candidate?.takeIf { it.isNotBlank() }
+    }
+
+    private fun openUrl(url: String) {
+        try {
+            val openIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(openIntent)
+            Log.d("FlowLink", "🌐 Successfully opened URL: $url")
+        } catch (e: Exception) {
+            Log.e("FlowLink", "Failed to open URL from Service context: $url", e)
+        }
     }
     
     private fun isSensitiveData(text: String): Boolean {
