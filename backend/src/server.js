@@ -105,21 +105,32 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server });
 
-server.listen(PORT, () => {
-  console.log(`FlowLink backend server running on port ${PORT}`);
+// Add error handling to WebSocket server
+wss.on('error', (error) => {
+  console.error('WebSocketServer error:', error);
+});
+
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ FlowLink backend server running on 0.0.0.0:${PORT}`);
+  console.log(`🔗 WebSocket: ws://localhost:${PORT} (local) or ws://<your-ip>:${PORT} (remote)`);
+  console.log(`🏥 Health check: http://localhost:${PORT}/health`);
+  console.log(`📊 Debug endpoint: http://localhost:${PORT}/debug`);
   console.log(`Environment: ${NODE_ENV}`);
-  console.log(`Server ready for WebSocket connections`);
-  console.log(`Health check available at /health`);
   
   // Health check for Railway
   if (NODE_ENV === 'production') {
-    console.log('Production mode: Railway deployment detected');
+    console.log('🚀 Production mode: Railway deployment detected');
   }
 });
 
 wss.on('connection', (ws, req) => {
   let deviceId = null;
   let sessionId = null;
+  const clientIp = req.socket.remoteAddress;
+  const clientPort = req.socket.remotePort;
+  const connectionTime = new Date().toISOString();
+  
+  console.log(`🔌 New WebSocket connection from ${clientIp}:${clientPort} at ${connectionTime}`);
 
   ws.on('message', async (data) => {
     try {
@@ -269,9 +280,11 @@ wss.on('connection', (ws, req) => {
     }
   });
 
-  ws.on('error', (error) => {
-    console.error('WebSocket error:', error);
-  });
+   ws.on('error', (error) => {
+     console.error(`❌ WebSocket error for device ${deviceId}:`, error.message || error);
+     console.error('Error code:', error.code);
+     console.error('Error details:', error);
+   });
 
   // Helper to send message
   function sendMessage(type, payload) {
