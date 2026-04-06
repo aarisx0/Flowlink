@@ -19,7 +19,6 @@ import com.flowlink.app.model.Device
 import com.flowlink.app.model.Intent as FlowIntent
 import com.flowlink.app.service.SessionManager
 import com.flowlink.app.service.WebSocketManager
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -148,40 +147,31 @@ class DeviceTilesFragment : Fragment() {
         val currentDeviceId = sessionManager?.getDeviceId()
         
         if (mainActivity != null && currentDeviceId != null) {
-            lifecycleScope.launch {
-                // Use collect (not collectLatest) to receive ALL device events
-                // collectLatest would cancel previous collection, causing us to miss devices
-                mainActivity.webSocketManager.deviceConnected.collect { deviceInfo ->
-                    deviceInfo?.let {
-                        // Only add devices that are not the current device
-                        if (it.id != currentDeviceId) {
-                            if (!connectedDevices.containsKey(it.id)) {
-                                val device = Device(
-                                    id = it.id,
-                                    name = it.name,
-                                    type = it.type,
-                                    online = true,
-                                    permissions = mapOf(
-                                        "files" to false,
-                                        "media" to false,
-                                        "prompts" to false,
-                                        "clipboard" to false,
-                                        "remote_browse" to false
-                                    ),
-                                    joinedAt = System.currentTimeMillis(),
-                                    lastSeen = System.currentTimeMillis()
-                                )
-                                connectedDevices[it.id] = device
-                                updateDeviceList()
-                                updateStatus(code)
-                                android.util.Log.d("FlowLink", "Added device to tiles: ${device.name} (${device.id})")
-                            } else {
-                                android.util.Log.d("FlowLink", "Device already in list: ${it.name} (${it.id})")
-                            }
-                        } else {
-                            android.util.Log.d("FlowLink", "Skipping self device: ${it.name} (${it.id})")
+            viewLifecycleOwner.lifecycleScope.launch {
+                mainActivity.webSocketManager.sessionDevices.collect { deviceInfos ->
+                    connectedDevices.clear()
+                    deviceInfos.forEach { info ->
+                        if (info.id != currentDeviceId) {
+                            connectedDevices[info.id] = Device(
+                                id = info.id,
+                                name = info.name,
+                                type = info.type,
+                                online = true,
+                                permissions = mapOf(
+                                    "files" to false,
+                                    "media" to false,
+                                    "prompts" to false,
+                                    "clipboard" to false,
+                                    "remote_browse" to false
+                                ),
+                                joinedAt = System.currentTimeMillis(),
+                                lastSeen = System.currentTimeMillis()
+                            )
                         }
                     }
+                    updateDeviceList()
+                    updateStatus(code)
+                    android.util.Log.d("FlowLink", "Updated tile list: ${connectedDevices.keys}")
                 }
             }
             

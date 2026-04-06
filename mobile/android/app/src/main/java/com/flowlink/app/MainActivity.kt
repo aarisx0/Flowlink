@@ -259,19 +259,20 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
         // Check if we have an active session and should show DeviceTiles
         val currentCode = sessionManager.getCurrentSessionCode()
         val currentSessionId = sessionManager.getCurrentSessionId()
+        val hasActiveSession = sessionManager.hasActiveSession()
         val connectionState = webSocketManager.connectionState.value
         
-        android.util.Log.d("FlowLink", "onResume: code=$currentCode, sessionId=$currentSessionId, connectionState=$connectionState")
+        android.util.Log.d("FlowLink", "onResume: code=$currentCode, sessionId=$currentSessionId, active=$hasActiveSession, connectionState=$connectionState")
         
         // If we have a session but are showing SessionManagerFragment, navigate to DeviceTiles
         val currentFragment = supportFragmentManager.findFragmentById(R.id.fragment_container)
-        if (currentCode != null && currentSessionId != null && currentFragment is SessionManagerFragment) {
+        if (hasActiveSession && currentCode != null && currentSessionId != null && currentFragment is SessionManagerFragment) {
             android.util.Log.d("FlowLink", "Restoring DeviceTiles view for existing session")
             showDeviceTiles(currentSessionId)
         }
         
         // If we have a session but WebSocket is disconnected, reconnect
-        if (currentCode != null && 
+        if (hasActiveSession && currentCode != null && 
             (connectionState is WebSocketManager.ConnectionState.Disconnected || 
              connectionState is WebSocketManager.ConnectionState.Error)) {
             android.util.Log.d("FlowLink", "Reconnecting WebSocket on resume with code: $currentCode")
@@ -372,6 +373,11 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
     fun joinSession(code: String) {
         lifecycleScope.launch {
             try {
+                if (webSocketManager.connectionState.value is WebSocketManager.ConnectionState.Connected) {
+                    webSocketManager.disconnect()
+                    kotlinx.coroutines.delay(150)
+                }
+
                 // Persist the attempted code locally so intents (if join succeeds)
                 // can be routed correctly once we know the real backend sessionId.
                 val session = sessionManager.joinSession(code)
@@ -402,6 +408,7 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
                                 state.message,
                                 Toast.LENGTH_LONG
                             ).show()
+                            sessionManager.setSessionActive(false)
                             sessionManager.leaveSession()
                             webSocketManager.disconnect()
                             // Stop collecting after handling error
@@ -429,6 +436,11 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
     }
 
     fun showDeviceTiles(sessionId: String) {
+        val currentFragment = supportFragmentManager.findFragmentById(R.id.fragment_container)
+        if (currentFragment is DeviceTilesFragment) {
+            return
+        }
+
         supportFragmentManager.beginTransaction()
             .replace(R.id.fragment_container, DeviceTilesFragment.newInstance(sessionId))
             .addToBackStack(null)
@@ -436,6 +448,11 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
     }
 
     fun showSessionCreated(code: String, sessionId: String) {
+        val currentFragment = supportFragmentManager.findFragmentById(R.id.fragment_container)
+        if (currentFragment is SessionCreatedFragment) {
+            return
+        }
+
         supportFragmentManager.beginTransaction()
             .replace(R.id.fragment_container, SessionCreatedFragment.newInstance(code, sessionId))
             .addToBackStack(null)
@@ -458,6 +475,7 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
             // Disconnect WebSocket
             webSocketManager.disconnect()
             // Clear session
+            sessionManager.setSessionActive(false)
             sessionManager.leaveSession()
             // Always go back to session manager (clear back stack)
             supportFragmentManager.popBackStack(null, androidx.fragment.app.FragmentManager.POP_BACK_STACK_INCLUSIVE)

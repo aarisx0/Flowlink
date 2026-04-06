@@ -13,7 +13,6 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.flowlink.app.MainActivity
 import com.flowlink.app.R
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
@@ -86,15 +85,13 @@ class SessionCreatedFragment : Fragment() {
         if (mainActivity != null && sessionId != null) {
             var hasNavigated = false
             
-            // Use lifecycleScope to listen for device connections
-            lifecycleScope.launch {
-                mainActivity.webSocketManager.deviceConnected.collectLatest { deviceInfo ->
-                    deviceInfo?.let {
-                        if (!hasNavigated) {
-                            hasNavigated = true
-                            sessionId?.let { id ->
-                                (activity as? MainActivity)?.showDeviceTiles(id)
-                            }
+            // Listen only while this view is active so backstack fragments do not re-navigate
+            viewLifecycleOwner.lifecycleScope.launch {
+                mainActivity.webSocketManager.deviceConnectedEvents.collect { _ ->
+                    if (!hasNavigated) {
+                        hasNavigated = true
+                        sessionId?.let { id ->
+                            (activity as? MainActivity)?.showDeviceTiles(id)
                         }
                     }
                 }

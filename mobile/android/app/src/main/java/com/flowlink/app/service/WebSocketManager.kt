@@ -6,7 +6,9 @@ import com.flowlink.app.model.Intent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import okhttp3.*
@@ -40,6 +42,14 @@ class WebSocketManager(private val mainActivity: MainActivity) {
     private val _deviceConnected = MutableStateFlow<DeviceInfo?>(null)
     val deviceConnected: StateFlow<DeviceInfo?> = _deviceConnected
 
+    // Emits the full current device list for the active session
+    private val _sessionDevices = MutableStateFlow<List<DeviceInfo>>(emptyList())
+    val sessionDevices: StateFlow<List<DeviceInfo>> = _sessionDevices
+
+    // One-shot event for host QR flow navigation
+    private val _deviceConnectedEvents = MutableSharedFlow<DeviceInfo>(extraBufferCapacity = 16)
+    val deviceConnectedEvents: SharedFlow<DeviceInfo> = _deviceConnectedEvents
+
     // Emits join-session state so the UI can react to success or failure
     private val _sessionJoinState = MutableStateFlow<SessionJoinState>(SessionJoinState.Idle)
     val sessionJoinState: StateFlow<SessionJoinState> = _sessionJoinState
@@ -54,6 +64,62 @@ class WebSocketManager(private val mainActivity: MainActivity) {
         // If we don't clear it, the QR screen can immediately auto-navigate to DeviceTiles
         // due to a stale "device_connected" from a previous session.
         _deviceConnected.value = null
+    }
+
+    private fun updateSessionDevices(devices: List<DeviceInfo>) {
+        val selfId = sessionManager.getDeviceId()
+        _sessionDevices.value = devices
+            .filter { it.id.isNotBlank() && it.id != selfId }
+            .distinctBy { it.id }
+    }
+
+    private fun upsertSessionDevice(deviceInfo: DeviceInfo) {
+        if (deviceInfo.id.isBlank() || deviceInfo.id == sessionManager.getDeviceId()) {
+            return
+        }
+
+        val updated = _sessionDevices.value.toMutableList()
+        val index = updated.indexOfFirst { it.id == deviceInfo.id }
+        if (index >= 0) {
+            updated[index] = deviceInfo
+        } else {
+            updated.add(deviceInfo)
+        }
+        _sessionDevices.value = updated.distinctBy { it.id }
+    }
+
+    private fun removeSessionDevice(deviceId: String) {
+        if (deviceId.isBlank()) return
+        _sessionDevices.value = _sessionDevices.value.filterNot { it.id == deviceId }
+    }
+
+    private fun buildDeviceInfo(deviceJson: JSONObject): DeviceInfo {
+        return DeviceInfo(
+            id = deviceJson.optString("id", ""),
+            name = deviceJson.optString("name", deviceJson.optString("deviceName", "Unknown Device")),
+            type = deviceJson.optString("type", deviceJson.optString("deviceType", "device"))
+        )
+    }
+
+    private fun sendSessionJoin(sessionCode: String) {
+        if (sessionCode.isEmpty()) {
+            return
+        }
+
+        _sessionJoinState.value = SessionJoinState.InProgress
+        val joinMessage = JSONObject().apply {
+            put("type", "session_join")
+            put("payload", JSONObject().apply {
+                put("code", sessionCode)
+                put("deviceId", sessionManager.getDeviceId())
+                put("deviceName", sessionManager.getDeviceName())
+                put("deviceType", sessionManager.getDeviceType())
+                put("username", sessionManager.getUsername())
+            })
+            put("timestamp", System.currentTimeMillis())
+        }
+        Log.d("FlowLink", "Sending session_join: $joinMessage")
+        sendMessage(joinMessage.toString())
     }
 
     data class SessionCreatedEvent(
@@ -73,6 +139,9 @@ class WebSocketManager(private val mainActivity: MainActivity) {
     fun connect(sessionCode: String) {
         try {
             if (_connectionState.value == ConnectionState.Connected) {
+                if (sessionCode.isNotEmpty()) {
+                    sendSessionJoin(sessionCode)
+                }
                 return
             }
 
@@ -114,19 +183,7 @@ class WebSocketManager(private val mainActivity: MainActivity) {
 
                 // Then send session_join if we have a code
                 if (sessionCode.isNotEmpty()) {
-                    val joinMessage = JSONObject().apply {
-                        put("type", "session_join")
-                        put("payload", JSONObject().apply {
-                            put("code", sessionCode)
-                            put("deviceId", sessionManager.getDeviceId())
-                            put("deviceName", sessionManager.getDeviceName())
-                            put("deviceType", sessionManager.getDeviceType())
-                            put("username", sessionManager.getUsername())
-                        })
-                        put("timestamp", System.currentTimeMillis())
-                    }
-                    Log.d("FlowLink", "Sending session_join: $joinMessage")
-                    sendMessage(joinMessage.toString())
+                    sendSessionJoin(sessionCode)
                 }
             }
 
@@ -177,6 +234,7 @@ class WebSocketManager(private val mainActivity: MainActivity) {
         webSocket = null
         _connectionState.value = ConnectionState.Disconnected
         _sessionJoinState.value = SessionJoinState.Idle
+        _sessionDevices.value = emptyList()
     }
 
     fun sendMessage(message: String) {
@@ -282,11 +340,7 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                 "device_connected" -> {
                     val payload = json.getJSONObject("payload")
                     val deviceJson = payload.optJSONObject("device") ?: payload
-                    val deviceInfo = DeviceInfo(
-                        id = deviceJson.optString("id", ""),
-                        name = deviceJson.optString("name", deviceJson.optString("deviceName", "Unknown Device")),
-                        type = deviceJson.optString("type", deviceJson.optString("deviceType", "device"))
-                    )
+                    val deviceInfo = buildDeviceInfo(deviceJson)
                     Log.d("FlowLink", "Received device_connected: ${deviceInfo.name} (${deviceInfo.id})")
                     Log.d("FlowLink", "  Current device ID: ${sessionManager.getDeviceId()}")
                     Log.d("FlowLink", "  Is self: ${deviceInfo.id == sessionManager.getDeviceId()}")
@@ -299,7 +353,9 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     
                     // Only emit if it's not the current device
                     if (deviceInfo.id.isNotBlank() && deviceInfo.id != sessionManager.getDeviceId()) {
+                        upsertSessionDevice(deviceInfo)
                         _deviceConnected.value = deviceInfo
+                        _deviceConnectedEvents.tryEmit(deviceInfo)
                         Log.d("FlowLink", "  Emitted device_connected event")
                     } else {
                         Log.d("FlowLink", "  Skipped (self)")
@@ -307,6 +363,12 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                 }
                 "device_disconnected" -> {
                     Log.d("FlowLink", "Device disconnected")
+                    val payload = json.optJSONObject("payload")
+                    val deviceJson = payload?.optJSONObject("device")
+                    val disconnectedDeviceId = deviceJson?.optString("id")
+                        ?: payload?.optString("deviceId")
+                        ?: ""
+                    removeSessionDevice(disconnectedDeviceId)
                 }
                 "session_created" -> {
                     val payload = json.getJSONObject("payload")
@@ -321,8 +383,10 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     // This ensures all future intent_send messages use the correct sessionId
                     scope.launch {
                         sessionManager.setSessionInfo(sessionId, code)
+                        sessionManager.setSessionActive(true)
                         Log.d("FlowLink", "Updated session info from session_created: id=$sessionId, code=$code")
                     }
+                    _sessionDevices.value = emptyList()
                     
                     _sessionCreated.value = SessionCreatedEvent(sessionId, code, expiresAt)
                     Log.d("FlowLink", "Session created: $code with sessionId: $sessionId")
@@ -345,6 +409,7 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                         scope.launch {
                             val currentCode = sessionManager.getCurrentSessionCode() ?: ""
                             sessionManager.setSessionInfo(backendSessionId, currentCode)
+                            sessionManager.setSessionActive(true)
                             Log.d("FlowLink", "Updated session info from session_joined: id=$backendSessionId, code=$currentCode")
                         }
                     }
@@ -352,28 +417,13 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     val devicesArray = payload.optJSONArray("devices")
                     if (devicesArray != null) {
                         Log.d("FlowLink", "Processing ${devicesArray.length()} devices from session_joined")
-                        // Notify about all devices in session
-                        // IMPORTANT: Emit each device separately with a small delay
-                        // so DeviceTilesFragment can collect all of them
-                        scope.launch {
-                            for (i in 0 until devicesArray.length()) {
-                                val deviceJson = devicesArray.getJSONObject(i)
-                                val deviceInfo = DeviceInfo(
-                                    id = deviceJson.getString("id"),
-                                    name = deviceJson.getString("name"),
-                                    type = deviceJson.getString("type")
-                                )
-                                // Only notify about other devices
-                                if (deviceInfo.id != sessionManager.getDeviceId()) {
-                                    Log.d("FlowLink", "Emitting device from session_joined: ${deviceInfo.name} (${deviceInfo.id})")
-                                    _deviceConnected.value = deviceInfo
-                                    // Small delay to ensure each emission is collected
-                                    kotlinx.coroutines.delay(50)
-                                } else {
-                                    Log.d("FlowLink", "Skipping self device: ${deviceInfo.name} (${deviceInfo.id})")
-                                }
-                            }
+                        val devices = mutableListOf<DeviceInfo>()
+                        for (i in 0 until devicesArray.length()) {
+                            val deviceJson = devicesArray.getJSONObject(i)
+                            val deviceInfo = buildDeviceInfo(deviceJson)
+                            devices.add(deviceInfo)
                         }
+                        updateSessionDevices(devices)
                     }
                     Log.d("FlowLink", "Session joined, devices updated")
 
@@ -395,8 +445,10 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                     
                     // Clear local session so user can start fresh
                     scope.launch {
+                        sessionManager.setSessionActive(false)
                         sessionManager.leaveSession()
                     }
+                    _sessionDevices.value = emptyList()
                     
                     // Don't set error state if we're not in a join flow
                     // This prevents crashes when session expires while app is active

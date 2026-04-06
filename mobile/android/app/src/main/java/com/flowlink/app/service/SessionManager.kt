@@ -79,6 +79,7 @@ class SessionManager(private val context: Context) {
         prefs.edit()
             .putString("current_session_id", sessionId)
             .putString("current_session_code", code)
+            .putBoolean("current_session_active", false)
             .apply()
 
         session
@@ -99,6 +100,7 @@ class SessionManager(private val context: Context) {
         prefs.edit()
             .putString("current_session_id", sessionId)
             .putString("current_session_code", code)
+            .putBoolean("current_session_active", false)
             .apply()
 
         session
@@ -109,6 +111,7 @@ class SessionManager(private val context: Context) {
             prefs.edit()
                 .remove("current_session_id")
                 .remove("current_session_code")
+                .remove("current_session_active")
                 .apply()
         }
     }
@@ -129,6 +132,16 @@ class SessionManager(private val context: Context) {
         .apply()
     }
   }
+
+    suspend fun setSessionActive(active: Boolean) {
+        withContext(Dispatchers.IO) {
+            prefs.edit().putBoolean("current_session_active", active).apply()
+        }
+    }
+
+    fun hasActiveSession(): Boolean {
+        return prefs.getBoolean("current_session_active", false)
+    }
 
     fun getDeviceId(): String = deviceId
     fun getDeviceName(): String = deviceName
