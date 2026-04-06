@@ -47,13 +47,14 @@
       </div>
 
       <div class="routing-card">
-        <h3>Receiver</h3>
-        <p>Send clipboard and media handoff to this username.</p>
+        <h3>Receivers</h3>
+        <p>Send clipboard and media handoff to one or more usernames.</p>
         <div class="receiver-row">
-          <input type="text" id="receiverUsernameInput" placeholder="Receiver username" />
+          <input type="text" id="receiverUsernameInput" placeholder="Comma-separated usernames" />
           <button id="saveReceiverBtn" class="btn btn-primary btn-compact">Save</button>
         </div>
         <div class="receiver-status" id="receiverStatus">No receiver selected</div>
+        <div class="receiver-list" id="receiverList"></div>
       </div>
 
       <!-- Features -->

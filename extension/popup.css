@@ -219,6 +219,39 @@ body {
   color: #4b5563;
 }
 
+.receiver-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.receiver-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  color: #1f2937;
+  font-size: 12px;
+}
+
+.receiver-chip.connected {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.receiver-chip.pending {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.receiver-chip.disconnected {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
 .btn-compact {
   width: auto;
   min-width: 72px;

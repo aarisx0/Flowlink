@@ -19,8 +19,81 @@ let lastMediaHandoffFingerprint = null;
 let lastMediaHandoffAt = 0;
 let lastClipboardSkipReason = null;
 let lastClipboardSkipAt = 0;
-let targetUsername = null;
-let lastTargetStatus = null;
+let targetUsernames = [];
+let targetStatuses = {};
+
+function normalizeTargetUsernames(value) {
+  const rawValues = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(',')
+      : [];
+  const seen = new Set();
+  return rawValues
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter((item) => item && !seen.has(item) && seen.add(item));
+}
+
+function getLegacyTargetUsername() {
+  return targetUsernames[0] || null;
+}
+
+function getTargetStatusSnapshot() {
+  return { ...targetStatuses };
+}
+
+function setTargetStatusesPending(usernames) {
+  const nextStatuses = {};
+  for (const name of usernames) {
+    const previous = targetStatuses[name];
+    nextStatuses[name] = previous?.connected
+      ? previous
+      : { targetUsername: name, connected: false, pending: true };
+  }
+  targetStatuses = nextStatuses;
+}
+
+function persistTargetUsernames() {
+  chrome.storage.local.set({
+    targetUsernames,
+    targetUsername: getLegacyTargetUsername()
+  });
+}
+
+function sendTargetConnectionPings() {
+  if (!username || !targetUsernames.length) {
+    return;
+  }
+
+  setTargetStatusesPending(targetUsernames);
+  for (const targetUsername of targetUsernames) {
+    sendMessage({
+      type: 'target_connection_ping',
+      payload: {
+        targetUsername,
+        sourceUsername: username,
+        sourceDeviceName: 'Browser Extension'
+      }
+    });
+  }
+}
+
+function sendTargetedMessages(type, payloadBuilder) {
+  if (targetUsernames.length) {
+    return targetUsernames.map((targetUsername) => sendMessage({
+      type,
+      payload: {
+        ...payloadBuilder(targetUsername),
+        targetUsername
+      }
+    }));
+  }
+
+  return [sendMessage({
+    type,
+    payload: payloadBuilder(null)
+  })];
+}
 
 // Initialize extension
 chrome.runtime.onInstalled.addListener(() => {
@@ -68,9 +141,11 @@ function initializeExtension() {
     }
     
     // THEN: Check for username and connect
-    chrome.storage.local.get(['username', 'targetUsername', 'settings'], (result) => {
+    chrome.storage.local.get(['username', 'targetUsername', 'targetUsernames', 'settings'], (result) => {
       console.log('Loaded from storage:', result);
-      targetUsername = result.targetUsername || null;
+      targetUsernames = normalizeTargetUsernames(result.targetUsernames?.length ? result.targetUsernames : result.targetUsername);
+      setTargetStatusesPending(targetUsernames);
+      persistTargetUsernames();
       
       if (result.username) {
         username = result.username;
@@ -112,7 +187,7 @@ function injectClipboardScript(tabId) {
   }
 
   chrome.scripting.executeScript({
-    target: { tabId },
+    target: { tabId, allFrames: true },
     files: ['content-clipboard.js']
   }).catch(() => {
     // Ignore restricted tabs or transient navigation failures.
@@ -143,7 +218,7 @@ function injectMediaScript(tabId) {
   }
 
   chrome.scripting.executeScript({
-    target: { tabId },
+    target: { tabId, allFrames: true },
     files: ['content-media.js']
   }).catch(() => {
     // Ignore restricted tabs or transient navigation failures.
@@ -215,16 +290,9 @@ function connectWebSocket() {
         console.log('📤 Sending registration:', registerMsg);
         sendMessage(registerMsg);
 
-        if (targetUsername) {
+        if (targetUsernames.length) {
           setTimeout(() => {
-            sendMessage({
-              type: 'target_connection_ping',
-              payload: {
-                targetUsername,
-                sourceUsername: username,
-                sourceDeviceName: 'Browser Extension'
-              }
-            });
+            sendTargetConnectionPings();
           }, 500);
         }
       } else {
@@ -562,7 +630,9 @@ function handleTargetConnectionRequest(payload) {
 }
 
 function handleTargetConnectionResult(payload) {
-  lastTargetStatus = payload || null;
+  if (payload?.targetUsername) {
+    targetStatuses[payload.targetUsername] = payload;
+  }
 
   try {
     chrome.runtime.sendMessage({
@@ -601,7 +671,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         break;
         
       case 'get_connection_status':
-        sendResponse({ connected: isConnected, username, targetUsername, lastTargetStatus });
+        sendResponse({
+          connected: isConnected,
+          username,
+          targetUsername: getLegacyTargetUsername(),
+          targetUsernames: [...targetUsernames],
+          targetStatuses: getTargetStatusSnapshot()
+        });
         break;
         
       case 'set_username':
@@ -625,14 +701,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         break;
 
       case 'set_target_username':
-        targetUsername = request.targetUsername?.trim() || null;
-        chrome.storage.local.set({ targetUsername });
-        lastTargetStatus = targetUsername
-          ? { connected: false, pending: true, targetUsername }
-          : null;
+      case 'set_target_usernames': {
+        targetUsernames = normalizeTargetUsernames(
+          request.type === 'set_target_usernames' ? request.targetUsernames : request.targetUsername
+        );
+        setTargetStatusesPending(targetUsernames);
+        persistTargetUsernames();
 
-        if (!targetUsername) {
-          sendResponse({ success: true, targetUsername, status: lastTargetStatus });
+        if (!targetUsernames.length) {
+          sendResponse({
+            success: true,
+            targetUsername: null,
+            targetUsernames: [],
+            targetStatuses: {}
+          });
           break;
         }
 
@@ -640,21 +722,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           connectWebSocket();
         }
 
-        const sent = sendMessage({
-          type: 'target_connection_ping',
-          payload: {
-            targetUsername,
-            sourceUsername: username,
-            sourceDeviceName: 'Browser Extension'
-          }
-        });
+        sendTargetConnectionPings();
 
         sendResponse({
           success: true,
-          targetUsername,
-          status: sent ? lastTargetStatus : { connected: false, pending: true, targetUsername }
+          targetUsername: getLegacyTargetUsername(),
+          targetUsernames: [...targetUsernames],
+          targetStatuses: getTargetStatusSnapshot()
         });
         break;
+      }
         
       case 'disconnect':
         if (ws) {
@@ -703,19 +780,18 @@ function handleMediaStateChanged(data, tab) {
       
       // Send to backend
       const msg = {
-        type: 'media_handoff',
-        payload: {
-          action: 'paused',
-          title,
-          url,
-          timestamp,
-          platform,
-          tabId: tab.id,
-          targetUsername
-        }
+        type: 'media_handoff'
       };
       console.log('📤 Sending media handoff to backend...');
-      sendMessage(msg);
+      sendTargetedMessages(msg.type, (targetUsername) => ({
+        action: 'paused',
+        title,
+        url,
+        timestamp,
+        platform,
+        tabId: tab.id,
+        targetUsername
+      }));
     }
   });
 }
@@ -753,15 +829,12 @@ function handleClipboardChanged(data) {
     
     console.log('📤 Sending clipboard to backend...');
 
-    const sent = sendMessage({
-      type: 'clipboard_broadcast',
-      payload: {
-        clipboard,
-        targetUsername
-      }
-    });
+    const sentResults = sendTargetedMessages('clipboard_broadcast', (targetUsername) => ({
+      clipboard,
+      targetUsername
+    }));
 
-    if (!sent) {
+    if (!sentResults.some(Boolean)) {
       logClipboardSkip('⚠️ Clipboard skipped: backend WebSocket is not connected.');
     }
   });
@@ -778,8 +851,11 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     connectWebSocket();
   }
 
-  if (Object.prototype.hasOwnProperty.call(changes, 'targetUsername')) {
-    targetUsername = changes.targetUsername?.newValue || null;
+  if (Object.prototype.hasOwnProperty.call(changes, 'targetUsernames') || Object.prototype.hasOwnProperty.call(changes, 'targetUsername')) {
+    targetUsernames = normalizeTargetUsernames(
+      changes.targetUsernames?.newValue?.length ? changes.targetUsernames.newValue : changes.targetUsername?.newValue
+    );
+    setTargetStatusesPending(targetUsernames);
   }
 });
 

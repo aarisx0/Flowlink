@@ -69,47 +69,18 @@ export default function RemoteAccess() {
 
         // Connect WebSocket with timeout handling
         let connectionTimeout: number;
-        let ws = new WebSocket(SIGNALING_WS_URL);
+        const ws = new WebSocket(SIGNALING_WS_URL);
         wsRef.current = ws;
-        
-        console.log('RemoteAccess: Attempting to connect to:', SIGNALING_WS_URL);
 
         // Set connection timeout
         connectionTimeout = window.setTimeout(() => {
           if (ws.readyState === WebSocket.CONNECTING) {
             ws.close();
-            const fallbackUrl = 'ws://localhost:8080';
-            console.log('RemoteAccess: Timeout on primary URL, trying fallback:', fallbackUrl);
-            
-            // Try fallback URL (localhost) if auto-detected URL fails
-            if (SIGNALING_WS_URL !== fallbackUrl) {
-              const fallbackWs = new WebSocket(fallbackUrl);
-              wsRef.current = fallbackWs;
-              
-              const fallbackTimeout = window.setTimeout(() => {
-                if (fallbackWs.readyState === WebSocket.CONNECTING) {
-                  fallbackWs.close();
-                  setError(`Connection timeout. Tried both ${SIGNALING_WS_URL} and ${fallbackUrl}. Make sure the backend server is running on port 8080.`);
-                }
-              }, 10000);
-              
-              fallbackWs.onopen = () => {
-                clearTimeout(fallbackTimeout);
-                ws = fallbackWs;
-                handleWebSocketOpen();
-              };
-              
-              fallbackWs.onerror = () => {
-                clearTimeout(fallbackTimeout);
-                setError(`Failed to connect to backend at ${SIGNALING_WS_URL} or fallback ${fallbackUrl}. Make sure the backend is running.`);
-              };
-            } else {
-              setError('Connection timeout. Make sure the backend server is running on port 8080.');
-            }
+            setError('Connection timeout. Make sure the backend server is running on port 8080.');
           }
         }, 10000); // 10 second timeout
-        
-        const handleWebSocketOpen = () => {
+
+        ws.onopen = () => {
           clearTimeout(connectionTimeout);
           setStatus('Requesting screen share...');
           
@@ -167,14 +138,9 @@ export default function RemoteAccess() {
           }
         };
 
-        ws.onopen = handleWebSocketOpen;
-
         ws.onerror = (err) => {
           console.error('WebSocket error:', err);
-          const wsUrl = (import.meta as any)?.env?.VITE_SIGNALING_URL || 
-                       (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + 
-                       '//' + window.location.hostname + ':8080';
-          setError(`Failed to connect to backend at ${wsUrl}. Make sure the backend server is running.`);
+          setError('Failed to connect to server. Make sure the backend is running on port 8080.');
         };
 
         ws.onclose = (event) => {
@@ -184,18 +150,9 @@ export default function RemoteAccess() {
             // Code 1001 = going away (server closed connection)
             let errorMsg = `Connection closed (code: ${event.code}). `;
             if (event.code === 1006) {
-              errorMsg += 'The server may not be running. Make sure:\n';
-              errorMsg += '1. Backend server is running on port 8080\n';
-              errorMsg += '2. Network connection is stable\n';
-              errorMsg += '3. Firewall allows connections to port 8080';
+              errorMsg += 'The server may not be running or the connection was lost. Make sure the backend is running on port 8080.';
             } else if (event.code === 1001) {
-              errorMsg += 'Server closed the connection. The backend may have crashed or disconnected.';
-            } else if (event.code === 1002) {
-              errorMsg += 'Protocol error. The backend may be using a different WebSocket protocol.';
-            } else if (event.code === 1003) {
-              errorMsg += 'Unsupported operation. The server rejected the message type.';
-            } else if (event.code === 1011) {
-              errorMsg += 'Server error. The backend encountered an unexpected error.';
+              errorMsg += 'Server closed the connection.';
             } else {
               errorMsg += 'Make sure the backend is running on port 8080.';
             }

@@ -1,0 +1,256 @@
+================================================================================
+AI IDE PLATFORMS RESEARCH & ANALYSIS FINAL REPORT
+================================================================================
+Date: March 31, 2026
+Project: FlowLink - Remote AI Coding Relay
+Objective: Evaluate programmatic prompt injection and automated building capabilities
+
+================================================================================
+EXECUTIVE SUMMARY
+================================================================================
+
+This research evaluates 4 AI IDE platforms for their capability to receive 
+prompts programmatically and trigger automated builds:
+
+1. CURSOR         - Score: 3/10  (Limited custom protocol, no official API)
+2. WINDSURF       - Score: 3/10  (Limited custom protocol, no official API)  
+3. KIRO           - Score: 2/10  (Undocumented, early-stage)
+4. VS CODE        - Score: 9/10  (Full Extension API + Copilot CLI)
+
+RECOMMENDATION: Implement VS Code with GitHub Copilot CLI for production
+automation, while maintaining custom protocols for compatibility.
+
+================================================================================
+DETAILED FINDINGS BY PLATFORM
+================================================================================
+
+1. CURSOR
+---------
+Company: Anysphere
+Status: Market leader in agentic coding (as of 2026)
+Website: https://www.cursor.sh
+
+Programmatic Support:
+  - Custom Protocol: YES (cursor://)
+  - Official API: NO
+  - CLI Agent: COMING SOON (beta)
+  - Headless Mode: NO
+
+Current Implementation in FlowLink:
+  Location: extension/relay.js (lines 110-112)
+  Method: iframe-based protocol trigger
+  Pattern: cursor://ai-relay?prompt=<BASE64_ENCODED_PROMPT>
+  Limit: 4000 characters max
+  
+Capabilities:
+  - Cursor Agents: Can work autonomously within IDE
+  - Cloud Agents: Available (self-hosted option)
+  - Terminal Access: Agents can run shell commands
+  - Code Review: Integrated PR review capability
+
+Limitations:
+  - No return channel for results
+  - No confirmation IDE received prompt
+  - Manual paste required into AI chat
+  - No automated build triggering
+  - Agents require user supervision
+  - No documented protocol parameters
+
+Future Potential:
+  - CLI agent in beta (monitor releases)
+  - When released: cursor-agent --prompt "..." --project path/
+  - Would enable full automation
+
+Recommendation: MONITOR - Wait for CLI agent release
+
+
+2. WINDSURF  
+-----------
+Company: Cognition Labs
+Status: Enterprise-focused agentic IDE
+Website: https://codeium.com/windsurf
+
+Programmatic Support:
+  - Custom Protocol: YES (windsurf://)
+  - Official API: NO
+  - MCP Support: YES (Model Context Protocol)
+  - Headless Mode: NO
+
+Current Implementation in FlowLink:
+  Location: extension/relay.js (lines 110-112)
+  Method: iframe-based protocol trigger
+  Pattern: windsurf://ai-relay?prompt=<BASE64_ENCODED_PROMPT>
+  Limit: 4000 characters max
+
+Advanced Features:
+  - Cascade: Deep codebase understanding (not externally accessible)
+  - MCP Servers: Can integrate custom tools and services
+  - Real-time Preview: See changes as Cascade works
+  - Linter Integration: Auto-fixes code quality issues
+
+MCP Integration Option:
+  - Create MCP server for FlowLink integration
+  - Windsurf connects to MCP for bidirectional communication
+  - Limitation: Still requires Windsurf IDE running
+  
+Limitations:
+  - MCP requires IDE to be running
+  - No external API or CLI
+  - No automated build triggering
+  - No headless execution documented
+  - Protocol parameters undocumented
+
+Future Potential:
+  - May release API or CLI tool
+  - MCP could be enhanced for more autonomy
+  - Monitor for announcements
+
+Recommendation: MONITOR - Consider MCP integration for future versions
+
+
+3. KIRO
+-------
+Status: Early-stage IDE, limited documentation
+Market Position: Emerging player
+
+Programmatic Support:
+  - Custom Protocol: YES (kiro://) - UNDOCUMENTED
+  - Official API: NO
+  - Documentation: MINIMAL
+  - Status: UNKNOWN
+
+Current Implementation in FlowLink:
+  Location: extension/relay.js (lines 110-112)
+  Pattern: kiro://ai-relay?prompt=<BASE64_ENCODED_PROMPT>
+  
+Limitations:
+  - Very limited public information
+  - Protocol behavior unclear
+  - No build automation info
+  - Community/support limited
+  - Appears to be very early stage
+
+Research Needed:
+  - GitHub repository exploration
+  - Official documentation
+  - Sample integrations
+  - Community discussions
+
+Recommendation: SKIP FOR NOW - Too early-stage for production use
+
+
+4. VS CODE (RECOMMENDED)
+------------------------
+Company: Microsoft (with GitHub/OpenAI)
+Status: Most mature, open ecosystem
+Website: https://code.visualstudio.com
+
+Programmatic Support:
+  - Extension API: FULL (JavaScript/TypeScript)
+  - VS Code CLI: YES (with command system)
+  - GitHub Copilot CLI: NEW (programmatic execution)
+  - Headless Mode: PARTIAL (with extensions/remote)
+  - REST API: NO (but command-based)
+
+APIs Available:
+  1. VS Code Extension API (vscode module)
+  2. Language Server Protocol (LSP)
+  3. Terminal API (execute commands)
+  4. Task System (build automation)
+  5. GitHub Copilot Chat API
+  6. GitHub Copilot CLI (NEW - fully programmatic)
+
+Custom Protocol:
+  - vscode:// protocol available
+  - Opens files and runs commands
+  - Example: vscode://file/path/to/file:10:5
+
+Advantages Over Others:
+  1. Official, well-documented APIs
+  2. Extension ecosystem (thousands available)
+  3. GitHub Copilot integration built-in
+  4. Task system for build automation
+  5. Terminal integration for running commands
+  6. Remote development support (SSH, containers)
+  7. Full control via JavaScript
+  8. CI/CD ready
+
+Build Automation:
+  - Native task system (.vscode/tasks.json)
+  - Can run npm, gradle, make, etc.
+  - Trigger from CLI: code --command workbench.action.tasks.runTask
+  - Can execute arbitrary shell commands
+
+Limitation:
+  - Still requires VS Code instance (unless using remote)
+  - Extension requires JavaScript knowledge
+  - Some features authentication-required
+
+Recommendation: IMPLEMENT IMMEDIATELY
+
+Integration Options:
+  A) Custom VS Code Extension (RECOMMENDED)
+     - Full control via Extension API
+     - Can integrate with Copilot Chat
+     - Return results via WebSocket
+     - Build automation via task system
+     
+  B) GitHub Copilot CLI (NEW - BEST FOR AUTOMATION)
+     - Command-line tool for headless execution
+     - Full programmatic support
+     - JSON output support
+     - CI/CD pipeline ready
+     - Example: copilot_cli execute --prompt "..." --context-dir ./src
+     
+  C) Combination Approach (RECOMMENDED FOR PRODUCTION)
+     - Use custom extension for interactive use
+     - Use Copilot CLI for CI/CD automation
+     - Complementary strengths
+
+================================================================================
+CURRENT FLOWLINK IMPLEMENTATION ANALYSIS
+================================================================================
+
+Location: extension/relay.js (145 lines of code)
+
+Current Method:
+  - Receives AI relay from Android device
+  - Displays in browser extension popup
+  - User selects target IDE
+  - Extension triggers protocol handler
+  - IDE receives prompt via custom protocol
+
+Key Code Sections:
+  
+  Line 24-30: triggerCustomProtocol function
+  ```javascript
+  function triggerCustomProtocol(protocolUrl) {
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.src = protocolUrl;
+    document.body.appendChild(iframe);
+    window.setTimeout(() => iframe.remove(), 1500);
+  }
+  ```
+  
+  Line 95-102: Protocol map
+  ```javascript
+  const protocolMap = {
+    auto: ['cursor://', 'windsurf://', 'kiro://', 'vscode://'],
+    cursor: ['cursor://'],
+    windsurf: ['windsurf://'],
+    kiro: ['kiro://'],
+    opencode: [],
+    vscode: ['vscode://']
+  };
+  ```
+  
+  Line 110-112: Trigger logic with 4000 char limit
+  ```javascript
+  protocols.forEach((protocol) => {
+    triggerCustomProtocol(`${protocol}ai-relay?prompt=${encodeURIComponent(latestRelay.prompt.slice(0, 4000))}`);
+  });
+  ```
+
+Limitations Found:
+  1. Hard-coded 4000 character limit (URL encoding overhead)

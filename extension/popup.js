@@ -8,13 +8,21 @@ let setupScreen, mainScreen, statusDot, statusText;
 let usernameInput, setupBtn;
 let userName, smartHandoffToggle, clipboardToggle, notificationsToggle;
 let activityList, openWebAppBtn, logoutBtn;
-let receiverUsernameInput, saveReceiverBtn, receiverStatus;
+let receiverUsernameInput, saveReceiverBtn, receiverStatus, receiverList;
 
 // State
 let isConnected = false;
 let currentUsername = null;
-let currentReceiverUsername = null;
-let lastTargetStatus = null;
+let currentReceiverUsernames = [];
+let targetStatuses = {};
+
+function parseReceiverUsernames(value) {
+  const seen = new Set();
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => item && !seen.has(item) && seen.add(item));
+}
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -38,6 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
   receiverUsernameInput = document.getElementById('receiverUsernameInput');
   saveReceiverBtn = document.getElementById('saveReceiverBtn');
   receiverStatus = document.getElementById('receiverStatus');
+  receiverList = document.getElementById('receiverList');
   
   // Load saved data
   loadUserData();
@@ -67,7 +76,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (message.type === 'connection_status') {
       updateConnectionStatus(message.connected);
     } else if (message.type === 'target_connection_result') {
-      lastTargetStatus = message.data || null;
+      const payload = message.data || null;
+      if (payload?.targetUsername) {
+        targetStatuses[payload.targetUsername] = payload;
+      }
       updateReceiverUI();
     }
   });
@@ -86,8 +98,10 @@ document.addEventListener('DOMContentLoaded', () => {
         currentUsername = response.username;
         userName.textContent = response.username;
       }
-      currentReceiverUsername = response.targetUsername || null;
-      lastTargetStatus = response.lastTargetStatus || null;
+      currentReceiverUsernames = Array.isArray(response.targetUsernames)
+        ? response.targetUsernames
+        : parseReceiverUsernames(response.targetUsername || '');
+      targetStatuses = response.targetStatuses || {};
       updateReceiverUI();
     }
   });
@@ -95,7 +109,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Load user data from storage
 function loadUserData() {
-  chrome.storage.local.get(['username', 'targetUsername', 'settings'], (result) => {
+  chrome.storage.local.get(['username', 'targetUsername', 'targetUsernames', 'settings'], (result) => {
     if (result.username) {
       // User is logged in
       currentUsername = result.username;
@@ -106,7 +120,9 @@ function loadUserData() {
       showSetupScreen();
     }
 
-    currentReceiverUsername = result.targetUsername || null;
+    currentReceiverUsernames = Array.isArray(result.targetUsernames)
+      ? result.targetUsernames
+      : parseReceiverUsernames(result.targetUsername || '');
     updateReceiverUI();
     
     // Load settings
@@ -163,9 +179,10 @@ function handleLogout() {
       }
       
       // Clear storage regardless of disconnect result
-      chrome.storage.local.remove(['username', 'deviceId', 'targetUsername'], () => {
+      chrome.storage.local.remove(['username', 'deviceId', 'targetUsername', 'targetUsernames'], () => {
         currentUsername = null;
-        currentReceiverUsername = null;
+        currentReceiverUsernames = [];
+        targetStatuses = {};
         usernameInput.value = '';
         showSetupScreen();
       });
@@ -174,48 +191,71 @@ function handleLogout() {
 }
 
 function handleReceiverSave() {
-  const targetUsername = receiverUsernameInput.value.trim();
+  const targetUsernames = parseReceiverUsernames(receiverUsernameInput.value);
 
-  chrome.runtime.sendMessage({ type: 'set_target_username', targetUsername }, (response) => {
+  chrome.runtime.sendMessage({ type: 'set_target_usernames', targetUsernames }, (response) => {
     if (chrome.runtime.lastError) {
-      console.error('Error saving receiver username:', chrome.runtime.lastError.message);
-      alert('Failed to save receiver username.');
+      console.error('Error saving receiver usernames:', chrome.runtime.lastError.message);
+      alert('Failed to save receiver usernames.');
       return;
     }
 
     if (!response?.success) {
-      alert(response?.error || 'Failed to save receiver username.');
+      alert(response?.error || 'Failed to save receiver usernames.');
       return;
     }
 
-    currentReceiverUsername = targetUsername || null;
-    lastTargetStatus = response.status || (targetUsername ? { pending: true, connected: false, targetUsername } : null);
+    currentReceiverUsernames = Array.isArray(response.targetUsernames) ? response.targetUsernames : [];
+    targetStatuses = response.targetStatuses || {};
     updateReceiverUI();
   });
 }
 
 function updateReceiverUI() {
-  if (!receiverUsernameInput || !receiverStatus) return;
+  if (!receiverUsernameInput || !receiverStatus || !receiverList) return;
 
-  receiverUsernameInput.value = currentReceiverUsername || '';
+  receiverUsernameInput.value = currentReceiverUsernames.join(', ');
+  receiverList.innerHTML = '';
 
-  if (!currentReceiverUsername) {
-    receiverStatus.textContent = 'No receiver selected';
+  if (!currentReceiverUsernames.length) {
+    receiverStatus.textContent = 'No receivers selected';
     return;
   }
 
-  if (lastTargetStatus?.pending) {
-    receiverStatus.textContent = `Checking ${currentReceiverUsername}...`;
-    return;
+  let connectedCount = 0;
+  let pendingCount = 0;
+
+  for (const targetUsername of currentReceiverUsernames) {
+    const status = targetStatuses[targetUsername] || { targetUsername, pending: true, connected: false };
+    const chip = document.createElement('div');
+    let className = 'pending';
+    let label = 'Checking';
+
+    if (status.connected) {
+      connectedCount += 1;
+      className = 'connected';
+      label = status.targetDeviceName || 'Connected';
+    } else if (status.pending) {
+      pendingCount += 1;
+    } else {
+      className = 'disconnected';
+      label = 'Sending';
+    }
+
+    chip.className = `receiver-chip ${className}`;
+    chip.textContent = `${targetUsername} - ${label}`;
+    receiverList.appendChild(chip);
   }
 
-  if (lastTargetStatus?.connected) {
-    const targetDeviceName = lastTargetStatus.targetDeviceName || 'device';
-    receiverStatus.textContent = `${currentReceiverUsername} connected on ${targetDeviceName}`;
-    return;
+  if (connectedCount === currentReceiverUsernames.length) {
+    receiverStatus.textContent = `All ${connectedCount} receivers connected`;
+  } else if (connectedCount > 0) {
+    receiverStatus.textContent = `${connectedCount}/${currentReceiverUsernames.length} receivers connected`;
+  } else if (pendingCount > 0) {
+    receiverStatus.textContent = `Checking ${pendingCount} receiver${pendingCount === 1 ? '' : 's'}...`;
+  } else {
+    receiverStatus.textContent = `Sending to ${currentReceiverUsernames.length} receiver${currentReceiverUsernames.length === 1 ? '' : 's'}`;
   }
-
-  receiverStatus.textContent = `Sending to ${currentReceiverUsername}`;
 }
 
 // Handle setting changes
