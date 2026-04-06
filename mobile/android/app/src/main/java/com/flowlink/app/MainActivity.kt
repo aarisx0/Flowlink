@@ -334,6 +334,12 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
                 // Clear the notification
                 notificationService.clearNotification(NotificationService.NOTIFICATION_ID_NEARBY)
             }
+            NotificationService.ACTION_OPEN_TAB_HANDOFF -> {
+                val tabHandoffJson = intent.getStringExtra(NotificationService.EXTRA_TAB_HANDOFF)
+                if (!tabHandoffJson.isNullOrBlank()) {
+                    openTabHandoff(JSONObject(tabHandoffJson))
+                }
+            }
         }
     }
 
@@ -491,6 +497,15 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
      */
     private fun handleRemoteIntent(intent: FlowIntent) {
         when (intent.intentType) {
+            "tab_handoff", "tab_collection_handoff" -> {
+                val payload = intent.payload ?: return
+                val tabJson = payload["tab_handoff"] ?: payload["tabs"] ?: return
+                try {
+                    openTabHandoff(JSONObject(tabJson))
+                } catch (e: Exception) {
+                    Toast.makeText(this, "Failed to open tab handoff", Toast.LENGTH_SHORT).show()
+                }
+            }
             "link_open" -> {
                 val payload = intent.payload ?: return
                 val linkJson = payload["link"] ?: return
@@ -675,6 +690,23 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
                 }
             }
         }
+    }
+
+    fun handleTabHandoffPayload(payload: JSONObject) {
+        openTabHandoff(payload)
+    }
+
+    private fun openTabHandoff(payload: JSONObject) {
+        val tabs = payload.optJSONArray("tabs") ?: return
+        if (tabs.length() == 0) {
+            return
+        }
+
+        val tabIntent = Intent(this, TabMirrorActivity::class.java).apply {
+            putExtra(NotificationService.EXTRA_TAB_HANDOFF, payload.toString())
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(tabIntent)
     }
 
     private fun openReceivedFile(fileObj: JSONObject, fallbackMimeType: String?) {

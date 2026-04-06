@@ -159,7 +159,11 @@ wss.on('connection', (ws, req) => {
         case 'media_handoff':
           handleMediaHandoff(ws, message);
           break;
-          
+
+        case 'tab_handoff':
+          handleTabHandoff(ws, message);
+          break;
+           
         case 'device_connected_notification':
           handleDeviceConnectedNotification(ws, message);
           break;
@@ -1054,6 +1058,72 @@ function handleMediaHandoff(ws, message) {
       });
       console.log(`Media handoff sent to device ${targetDeviceId}`);
     }
+  }
+}
+
+function handleTabHandoff(ws, message) {
+  const { sessionId, deviceId } = message;
+  const { tabs, activeIndex, collectionTitle, sentAt, sourceUsername, sourceDeviceName, targetUsername } = message.payload || {};
+
+  if (!Array.isArray(tabs) || !tabs.length) {
+    sendError(ws, 'Missing tabs for tab_handoff');
+    return;
+  }
+
+  const senderDevice = globalDevices.get(deviceId);
+  const username = typeof targetUsername === 'string' && targetUsername.trim()
+    ? targetUsername.trim()
+    : senderDevice?.device.username;
+
+  if (!username) {
+    sendError(ws, 'Missing target username for tab_handoff');
+    return;
+  }
+
+  const payload = {
+    tabs: tabs.map((tab) => ({
+      url: typeof tab?.url === 'string' ? tab.url : '',
+      title: typeof tab?.title === 'string' ? tab.title : '',
+      favIconUrl: typeof tab?.favIconUrl === 'string' ? tab.favIconUrl : '',
+      scrollX: Number.isFinite(tab?.scrollX) ? tab.scrollX : 0,
+      scrollY: Number.isFinite(tab?.scrollY) ? tab.scrollY : 0,
+      scrollProgress: Number.isFinite(tab?.scrollProgress) ? tab.scrollProgress : 0,
+      viewportHeight: Number.isFinite(tab?.viewportHeight) ? tab.viewportHeight : 0,
+      documentHeight: Number.isFinite(tab?.documentHeight) ? tab.documentHeight : 0,
+      mediaTimestamp: Number.isFinite(tab?.mediaTimestamp) ? tab.mediaTimestamp : 0,
+      mediaPaused: typeof tab?.mediaPaused === 'boolean' ? tab.mediaPaused : true,
+      selectionText: typeof tab?.selectionText === 'string' ? tab.selectionText : '',
+      pageTitle: typeof tab?.pageTitle === 'string' ? tab.pageTitle : '',
+      capturedAt: Number.isFinite(tab?.capturedAt) ? tab.capturedAt : Date.now()
+    })),
+    activeIndex: Number.isInteger(activeIndex) ? activeIndex : 0,
+    collectionTitle: typeof collectionTitle === 'string' ? collectionTitle : 'Tab handoff',
+    sentAt: Number.isFinite(sentAt) ? sentAt : Date.now(),
+    sourceUsername: typeof sourceUsername === 'string' && sourceUsername ? sourceUsername : senderDevice?.device.username || '',
+    sourceDeviceName: typeof sourceDeviceName === 'string' && sourceDeviceName ? sourceDeviceName : senderDevice?.device.name || 'Browser Extension'
+  };
+
+  if (sessionId) {
+    broadcastToSession(sessionId, {
+      type: 'tab_handoff_offer',
+      sessionId,
+      payload,
+      timestamp: Date.now()
+    }, deviceId);
+    return;
+  }
+
+  for (const [targetDeviceId, deviceEntry] of globalDevices.entries()) {
+    if (targetDeviceId === deviceId) continue;
+    if (deviceEntry.device.username !== username) continue;
+
+    sendToSingleDevice(targetDeviceId, {
+      type: 'tab_handoff_offer',
+      sessionId: null,
+      deviceId: targetDeviceId,
+      payload,
+      timestamp: Date.now()
+    });
   }
 }
 

@@ -499,6 +499,26 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                         Log.e("FlowLink", "Failed to show media handoff notification", e)
                     }
                 }
+                "tab_handoff_offer" -> {
+                    Log.d("FlowLink", "🪟 Received tab handoff offer")
+                    val payload = json.getJSONObject("payload")
+                    val tabs = payload.optJSONArray("tabs")
+                    if (tabs != null && tabs.length() > 0) {
+                        val sourceDeviceName = payload.optString("sourceDeviceName", "Browser Extension")
+                        val collectionTitle = payload.optString("collectionTitle", "Tab handoff")
+                        try {
+                            mainActivity.handleTabHandoffPayload(payload)
+                        } catch (e: Exception) {
+                            Log.e("FlowLink", "Failed to open tab handoff directly", e)
+                            mainActivity.notificationService.showTabHandoff(
+                                collectionTitle,
+                                payload.toString(),
+                                sourceDeviceName,
+                                tabs.length()
+                            )
+                        }
+                    }
+                }
                 "target_connection_request" -> {
                     Log.d("FlowLink", "📨 Received target connection request")
                     val payload = json.getJSONObject("payload")

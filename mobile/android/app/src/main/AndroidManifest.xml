@@ -55,6 +55,11 @@
                 <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".TabMirrorActivity"
+            android:exported="false"
+            android:theme="@style/Theme.FlowLink" />
         
         <provider
             android:name="androidx.core.content.FileProvider"

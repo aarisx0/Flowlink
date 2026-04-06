@@ -257,6 +257,20 @@ class InvitationListenerService : Service() {
                     )
                 }
 
+                "tab_handoff_offer" -> {
+                    val payload = json.getJSONObject("payload")
+                    val tabs = payload.optJSONArray("tabs")
+                    val tabCount = tabs?.length() ?: 0
+                    if (tabCount > 0) {
+                        notificationService.showTabHandoff(
+                            payload.optString("collectionTitle", if (tabCount > 1) "$tabCount tabs" else "Tab handoff"),
+                            payload.toString(),
+                            payload.optString("sourceDeviceName", "Browser Extension"),
+                            tabCount
+                        )
+                    }
+                }
+
                 "target_connection_request" -> {
                     val payload = json.getJSONObject("payload")
                     val sourceDeviceId = payload.optString("sourceDeviceId", "")

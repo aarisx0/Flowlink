@@ -9,6 +9,7 @@ let usernameInput, setupBtn;
 let userName, smartHandoffToggle, clipboardToggle, notificationsToggle;
 let activityList, openWebAppBtn, logoutBtn;
 let receiverUsernameInput, saveReceiverBtn, receiverStatus, receiverList;
+let sendActiveTabBtn, sendTabCollectionBtn;
 
 // State
 let isConnected = false;
@@ -47,6 +48,8 @@ document.addEventListener('DOMContentLoaded', () => {
   saveReceiverBtn = document.getElementById('saveReceiverBtn');
   receiverStatus = document.getElementById('receiverStatus');
   receiverList = document.getElementById('receiverList');
+  sendActiveTabBtn = document.getElementById('sendActiveTabBtn');
+  sendTabCollectionBtn = document.getElementById('sendTabCollectionBtn');
   
   // Load saved data
   loadUserData();
@@ -70,6 +73,8 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   
   logoutBtn.addEventListener('click', handleLogout);
+  sendActiveTabBtn.addEventListener('click', () => handleTabSend('send_active_tab_handoff'));
+  sendTabCollectionBtn.addEventListener('click', () => handleTabSend('send_tab_collection_handoff'));
   
   // Listen for connection status updates
   chrome.runtime.onMessage.addListener((message) => {
@@ -258,6 +263,29 @@ function updateReceiverUI() {
   }
 }
 
+function handleTabSend(type) {
+  if (!currentReceiverUsernames.length) {
+    alert('Add at least one receiver username first.');
+    return;
+  }
+
+  chrome.runtime.sendMessage({ type }, (response) => {
+    if (chrome.runtime.lastError) {
+      console.error('Error sending tab handoff:', chrome.runtime.lastError.message);
+      alert('Failed to send tab handoff.');
+      return;
+    }
+
+    if (!response?.success) {
+      alert(response?.error || 'Failed to send tab handoff.');
+      return;
+    }
+
+    const label = type === 'send_active_tab_handoff' ? 'Active tab sent' : `${response.tabCount || 0} tabs sent`;
+    addActivity('tab', `${label} to ${currentReceiverUsernames.join(', ')}`);
+  });
+}
+
 // Handle setting changes
 function handleSettingChange() {
   const settings = {
@@ -314,7 +342,7 @@ function addActivity(type, message) {
   
   const icon = document.createElement('div');
   icon.className = 'activity-icon';
-  icon.textContent = type === 'media' ? '🎬' : '📋';
+  icon.textContent = type === 'media' ? '🎬' : type === 'tab' ? '🪟' : '📋';
   
   const text = document.createElement('div');
   text.className = 'activity-text';

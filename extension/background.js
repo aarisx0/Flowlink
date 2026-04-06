@@ -449,6 +449,175 @@ function buildTimestampedMediaUrl(url, timestamp) {
   return url;
 }
 
+function executeScriptAsync(target, func, args = []) {
+  return new Promise((resolve, reject) => {
+    chrome.scripting.executeScript({ target, func, args }, (results) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(results || []);
+    });
+  });
+}
+
+function queryTabsAsync(queryInfo) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.query(queryInfo, (tabs) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(tabs || []);
+    });
+  });
+}
+
+async function captureTabState(tab) {
+  const baseState = {
+    url: tab.url || '',
+    title: tab.title || tab.url || 'Untitled Tab',
+    favIconUrl: tab.favIconUrl || '',
+    scrollX: 0,
+    scrollY: 0,
+    scrollProgress: 0,
+    viewportHeight: 0,
+    documentHeight: 0,
+    mediaTimestamp: 0,
+    mediaPaused: true,
+    selectionText: '',
+    capturedAt: Date.now()
+  };
+
+  if (!tab.id || !tab.url || !isInjectableUrl(tab.url)) {
+    return baseState;
+  }
+
+  try {
+    const results = await executeScriptAsync(
+      { tabId: tab.id, allFrames: false },
+      () => {
+        const root = document.scrollingElement || document.documentElement || document.body;
+        const scrollY = Math.max(window.scrollY || 0, root?.scrollTop || 0);
+        const scrollX = Math.max(window.scrollX || 0, root?.scrollLeft || 0);
+        const viewportHeight = window.innerHeight || 0;
+        const documentHeight = Math.max(
+          root?.scrollHeight || 0,
+          document.documentElement?.scrollHeight || 0,
+          document.body?.scrollHeight || 0
+        );
+        const maxScrollable = Math.max(documentHeight - viewportHeight, 0);
+        const selection = window.getSelection ? window.getSelection().toString().trim() : '';
+        const media = Array.from(document.querySelectorAll('video, audio')).find((element) => {
+          return element.currentSrc || element.src || !element.paused || element.readyState > 0;
+        });
+
+        return {
+          scrollX,
+          scrollY,
+          scrollProgress: maxScrollable > 0 ? Math.min(scrollY / maxScrollable, 1) : 0,
+          viewportHeight,
+          documentHeight,
+          mediaTimestamp: media && Number.isFinite(media.currentTime) ? Math.floor(media.currentTime) : 0,
+          mediaPaused: media ? Boolean(media.paused) : true,
+          selectionText: selection.slice(0, 280),
+          pageTitle: document.title || ''
+        };
+      }
+    );
+
+    return {
+      ...baseState,
+      ...(results[0]?.result || {})
+    };
+  } catch (_err) {
+    return baseState;
+  }
+}
+
+async function collectWindowTabsForHandoff() {
+  const tabs = await queryTabsAsync({ currentWindow: true });
+  const validTabs = tabs
+    .filter((tab) => tab.url && isInjectableUrl(tab.url))
+    .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+
+  const capturedTabs = [];
+  for (const tab of validTabs) {
+    capturedTabs.push(await captureTabState(tab));
+  }
+
+  const activeIndex = validTabs.findIndex((tab) => tab.active);
+  return {
+    tabs: capturedTabs,
+    activeIndex: activeIndex >= 0 ? activeIndex : 0
+  };
+}
+
+async function collectActiveTabForHandoff() {
+  const [activeTab] = await queryTabsAsync({ active: true, currentWindow: true });
+  if (!activeTab) {
+    return { tabs: [], activeIndex: 0 };
+  }
+
+  return {
+    tabs: [await captureTabState(activeTab)],
+    activeIndex: 0
+  };
+}
+
+async function sendTabHandoff(kind) {
+  if (!username) {
+    throw new Error('Set extension username first.');
+  }
+
+  if (!targetUsernames.length) {
+    throw new Error('Add at least one receiver username.');
+  }
+
+  if (!isConnected) {
+    connectWebSocket();
+    throw new Error('Backend WebSocket is not connected yet. Try again in a moment.');
+  }
+
+  const snapshot = kind === 'collection'
+    ? await collectWindowTabsForHandoff()
+    : await collectActiveTabForHandoff();
+
+  if (!snapshot.tabs.length) {
+    throw new Error('No supported tabs found to send.');
+  }
+
+  const payloadBase = {
+    tabs: snapshot.tabs,
+    activeIndex: snapshot.activeIndex,
+    sourceUsername: username,
+    sourceDeviceName: 'Browser Extension',
+    collectionTitle: kind === 'collection' ? `${snapshot.tabs.length} tabs from Chrome` : snapshot.tabs[0].title,
+    sentAt: Date.now()
+  };
+
+  const sentResults = sendTargetedMessages('tab_handoff', (targetUsername) => ({
+    ...payloadBase,
+    targetUsername
+  }));
+
+  if (!sentResults.some(Boolean)) {
+    throw new Error('Failed to send tab handoff to backend.');
+  }
+
+  chrome.notifications.create({
+    type: 'basic',
+    iconUrl: 'icons/icon128.png',
+    title: kind === 'collection' ? 'Tabs Sent' : 'Tab Sent',
+    message: kind === 'collection'
+      ? `${snapshot.tabs.length} tabs sent to ${targetUsernames.join(', ')}`
+      : `${snapshot.tabs[0].title} sent to ${targetUsernames.join(', ')}`,
+    priority: 0
+  });
+
+  return { success: true, tabCount: snapshot.tabs.length };
+}
+
 // Handle incoming messages
 function handleMessage(message) {
   console.log('📥 Received from backend:', message.type, message);
@@ -732,6 +901,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
         break;
       }
+
+      case 'send_active_tab_handoff':
+      case 'send_active_tab':
+        sendTabHandoff('single')
+          .then((result) => sendResponse(result))
+          .catch((error) => sendResponse({ success: false, error: error.message }));
+        break;
+
+      case 'send_tab_collection_handoff':
+      case 'send_window_tabs_handoff':
+      case 'send_tab_collection':
+        sendTabHandoff('collection')
+          .then((result) => sendResponse(result))
+          .catch((error) => sendResponse({ success: false, error: error.message }));
+        break;
         
       case 'disconnect':
         if (ws) {

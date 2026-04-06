@@ -300,6 +300,18 @@ body {
   margin-bottom: 16px;
 }
 
+.quick-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.btn-split {
+  width: 50%;
+  padding: 10px 8px;
+  font-size: 12px;
+}
+
 .feature-item {
   display: flex;
   align-items: center;

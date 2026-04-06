@@ -8,6 +8,8 @@ export type DeviceType = 'phone' | 'laptop' | 'desktop' | 'tablet';
 export type IntentType = 
   | 'file_handoff'
   | 'media_continuation'
+  | 'tab_handoff'
+  | 'tab_collection_handoff'
   | 'link_open'
   | 'prompt_injection'
   | 'clipboard_sync'
@@ -109,6 +111,30 @@ export interface IntentPayload {
     url: string;
     title?: string;
   };
+
+  // Tab handoff
+  tab_handoff?: {
+    tabs: Array<{
+      url: string;
+      title?: string;
+      favIconUrl?: string;
+      scrollX?: number;
+      scrollY?: number;
+      scrollProgress?: number;
+      viewportHeight?: number;
+      documentHeight?: number;
+      mediaTimestamp?: number;
+      mediaPaused?: boolean;
+      selectionText?: string;
+      pageTitle?: string;
+      capturedAt?: number;
+    }>;
+    activeIndex?: number;
+    collectionTitle?: string;
+    sourceUsername?: string;
+    sourceDeviceName?: string;
+    sentAt?: number;
+  };
   
   // Prompt injection
   prompt?: {
@@ -196,6 +222,8 @@ export type MessageType =
   | 'session_invitation'
   | 'invitation_response'
   | 'nearby_session_broadcast'
+  | 'tab_handoff'
+  | 'tab_handoff_offer'
   | 'notification'
   | 'error';
 

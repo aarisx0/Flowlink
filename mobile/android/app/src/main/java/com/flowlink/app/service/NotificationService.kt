@@ -34,6 +34,7 @@ class NotificationService(private val context: Context) {
         const val ACTION_JOIN_NEARBY = "join_nearby"
         const val ACTION_DISMISS = "dismiss"
         const val ACTION_CONTINUE_MEDIA = "continue_media"
+        const val ACTION_OPEN_TAB_HANDOFF = "open_tab_handoff"
         
         const val EXTRA_SESSION_ID = "session_id"
         const val EXTRA_SESSION_CODE = "session_code"
@@ -41,6 +42,7 @@ class NotificationService(private val context: Context) {
         const val EXTRA_INVITER_DEVICE_NAME = "inviter_device_name"
         const val EXTRA_MEDIA_URL = "media_url"
         const val EXTRA_MEDIA_TIMESTAMP = "media_timestamp"
+        const val EXTRA_TAB_HANDOFF = "tab_handoff"
     }
     
     private val notificationManager = NotificationManagerCompat.from(context)
@@ -262,6 +264,40 @@ class NotificationService(private val context: Context) {
             .build()
         
         notificationManager.notify(NOTIFICATION_ID_MEDIA, notification)
+    }
+
+    fun showTabHandoff(title: String, tabsJson: String, sourceLabel: String, tabCount: Int) {
+        val openIntent = Intent(context, MainActivity::class.java).apply {
+            action = ACTION_OPEN_TAB_HANDOFF
+            putExtra(EXTRA_TAB_HANDOFF, tabsJson)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+
+        val openPendingIntent = PendingIntent.getActivity(
+            context,
+            200,
+            openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val message = if (tabCount > 1) {
+            "$title from $sourceLabel"
+        } else {
+            sourceLabel
+        }
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID_GENERAL)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(if (tabCount > 1) "Tabs Ready to Resume" else "Tab Ready to Resume")
+            .setContentText(message)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(openPendingIntent)
+            .addAction(R.drawable.ic_notification, if (tabCount > 1) "Open Tabs" else "Open Tab", openPendingIntent)
+            .build()
+
+        notificationManager.notify(NOTIFICATION_ID_GENERAL + 10, notification)
     }
     
     private fun formatTimestamp(seconds: Int): String {
