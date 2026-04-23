@@ -57,24 +57,27 @@
 
 .chat-split-panel {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: min(420px, 90vw);
-  height: 100vh;
+  right: 1rem;
+  bottom: 4.4rem;
+  width: min(390px, 92vw);
+  height: min(560px, 74vh);
   z-index: 1200;
-  transform: translateX(-103%);
+  transform: translateY(14px) scale(0.98);
   opacity: 0;
-  transition: transform 0.3s ease, opacity 0.25s ease;
+  pointer-events: none;
+  transition: transform 0.2s ease, opacity 0.2s ease;
   background: rgba(239, 246, 255, 0.95);
-  border-right: 1px solid rgba(148, 163, 184, 0.35);
-  box-shadow: 16px 0 32px rgba(15, 23, 42, 0.2);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 14px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.2);
   display: flex;
   flex-direction: column;
 }
 
 .chat-split-panel.open {
-  transform: translateX(0);
+  transform: translateY(0) scale(1);
   opacity: 1;
+  pointer-events: auto;
 }
 
 .chat-inline-header {
@@ -233,6 +236,122 @@
 
 .typing-dots i:nth-child(3) {
   animation-delay: 0.3s;
+}
+
+.floating-chat-button-wrap {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 1201;
+}
+
+.floating-chat-button {
+  border: none;
+  border-radius: 999px;
+  background: #2563eb;
+  color: #fff;
+  padding: 0.68rem 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.35);
+}
+
+.study-panel {
+  position: fixed;
+  right: 1rem;
+  bottom: 4.4rem;
+  width: min(410px, 94vw);
+  min-height: 320px;
+  max-height: 72vh;
+  opacity: 0;
+  transform: translateY(14px) scale(0.98);
+  pointer-events: none;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.2);
+  z-index: 1199;
+  overflow: hidden;
+}
+
+.study-panel.open {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+.study-tabs {
+  display: flex;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+.study-tabs button {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 0.6rem;
+  cursor: pointer;
+}
+
+.study-tabs button.active {
+  background: rgba(37, 99, 235, 0.12);
+  font-weight: 600;
+}
+
+.study-store,
+.study-room {
+  padding: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.study-upload-btn {
+  align-self: flex-start;
+  background: #2563eb;
+  color: #fff;
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+}
+
+.study-store-list {
+  overflow-y: auto;
+  max-height: 46vh;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.study-file-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid rgba(203, 213, 225, 0.8);
+  border-radius: 8px;
+  padding: 0.5rem;
+}
+
+.study-file-row small {
+  display: block;
+  color: #64748b;
+}
+
+.study-file-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.study-file-actions button {
+  border: none;
+  border-radius: 6px;
+  padding: 0.35rem 0.55rem;
+  cursor: pointer;
+}
+
+.study-file-actions .danger {
+  background: #fee2e2;
+  color: #991b1b;
 }
 
 @keyframes flowlink-typing {

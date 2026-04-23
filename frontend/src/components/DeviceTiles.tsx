@@ -36,6 +36,16 @@ interface ChatMessageItem {
   seen: boolean;
 }
 
+interface StudyStoreFile {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  data: string;
+  uploadedBy?: string;
+  uploadedAt?: number;
+}
+
 export default function DeviceTiles({
   session,
   deviceId,
@@ -78,6 +88,12 @@ export default function DeviceTiles({
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const [typingByDevice, setTypingByDevice] = useState<Record<string, boolean>>({});
   const [transferStatuses, setTransferStatuses] = useState<Record<string, FileTransferStatus | null>>({});
+  const [isStudyOpen, setIsStudyOpen] = useState(false);
+  const [activeStudyTab, setActiveStudyTab] = useState<'store' | 'room'>('store');
+  const [studyFiles, setStudyFiles] = useState<StudyStoreFile[]>([]);
+  const [studyPage, setStudyPage] = useState(1);
+  const [studyScroll, setStudyScroll] = useState(0);
+  const [studyHighlight, setStudyHighlight] = useState('');
   const wsRef = useRef<WebSocket | null>(null);
   const webrtcManagerRef = useRef<WebRTCManager | null>(null);
   const intentRouterRef = useRef<IntentRouter | null>(null);
@@ -89,6 +105,7 @@ export default function DeviceTiles({
   const incomingTransferBuffersRef = useRef<Map<string, { fileName: string; fileType: string; totalBytes: number; startedAt: number; chunks: Uint8Array[]; sourceDevice: string; transferredBytes: number; lastAckBytes: number }>>(new Map());
   const chatBodyRef = useRef<HTMLDivElement | null>(null);
   const chatTypingStopTimerRef = useRef<number | null>(null);
+  const transferUiTickRef = useRef<Map<string, number>>(new Map());
 
   const estimateTransferRate = (bytes: number) => Math.max(256 * 1024, 4 * 1024 * 1024 - Math.min(3 * 1024 * 1024, bytes / 8));
 
@@ -203,6 +220,13 @@ export default function DeviceTiles({
   };
 
   const applyTransferStats = (deviceId: string, stats: FileTransferStatus) => {
+    const now = Date.now();
+    const lastTick = transferUiTickRef.current.get(deviceId) || 0;
+    const shouldForce = stats.completed || Math.abs((stats.progress || 0) - ((transferStatuses[deviceId]?.progress) || 0)) >= 5;
+    if (!shouldForce && now - lastTick < 220) {
+      return;
+    }
+    transferUiTickRef.current.set(deviceId, now);
     setTransferStatuses((prev) => ({
       ...prev,
       [deviceId]: stats,
@@ -215,6 +239,7 @@ export default function DeviceTiles({
           if (!prev[deviceId]) return prev;
           const next = { ...prev };
           delete next[deviceId];
+          transferUiTickRef.current.delete(deviceId);
           return next;
         });
       }, 1800);
@@ -332,7 +357,8 @@ export default function DeviceTiles({
       if (['device_connected', 'device_disconnected', 'device_status_update', 
            'intent_received', 'intent_accepted', 'intent_rejected',
            'file_transfer_progress', 'file_transfer_start', 'file_transfer_chunk', 'file_transfer_complete', 'file_transfer_cancel', 'file_transfer_ack',
-           'group_created', 'group_updated', 'group_deleted', 'chat_typing'].includes(message.type)) {
+           'group_created', 'group_updated', 'group_deleted', 'chat_typing',
+           'study_store_list', 'study_sync'].includes(message.type)) {
         handleWebSocketMessage(message);
       }
     };
@@ -368,6 +394,15 @@ export default function DeviceTiles({
     // Initialize Group Service
     groupService.initialize(ws, session.id, deviceId);
     groupService.subscribe(setGroups);
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'study_store_list',
+        sessionId: session.id,
+        deviceId,
+        payload: {},
+        timestamp: Date.now(),
+      }));
+    }
 
     return () => {
       if (ws) {
@@ -581,6 +616,13 @@ export default function DeviceTiles({
       }
       case 'file_transfer_ack': {
         const payload = message.payload || {};
+        if (payload.transferId && typeof payload.transferredBytes === 'number') {
+          fileBridgeRef.current?.handleTransferAck(
+            payload.transferId,
+            payload.transferredBytes,
+            Boolean(payload.completed)
+          );
+        }
         const source = payload.sourceDevice || message.deviceId || payload.targetDevice;
         if (!source) break;
         const totalBytes = payload.totalBytes || 0;
@@ -710,6 +752,23 @@ export default function DeviceTiles({
         if (!source) break;
         const isTyping = Boolean(message.payload?.isTyping);
         setTypingByDevice((prev) => ({ ...prev, [source]: isTyping }));
+        break;
+      }
+      case 'study_store_list': {
+        setStudyFiles(message.payload?.files || []);
+        break;
+      }
+      case 'study_sync': {
+        const payload = message.payload || {};
+        if (payload.mode === 'page' && Number.isFinite(payload.value)) {
+          setStudyPage(Math.max(1, Number(payload.value)));
+        }
+        if (payload.mode === 'scroll' && Number.isFinite(payload.value)) {
+          setStudyScroll(Math.max(0, Math.min(100, Number(payload.value))));
+        }
+        if (payload.mode === 'highlight' && typeof payload.value === 'string') {
+          setStudyHighlight(payload.value);
+        }
         break;
       }
 
@@ -1518,6 +1577,57 @@ export default function DeviceTiles({
     );
   };
 
+  const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+  };
+
+  const downloadStudyFile = (file: StudyStoreFile) => {
+    const bytes = base64ToUint8Array(file.data);
+    const copy = new Uint8Array(bytes.byteLength);
+    copy.set(bytes);
+    const blob = new Blob([copy.buffer], { type: file.type || 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = file.name;
+    a.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1200);
+  };
+
+  const uploadStudyFile = async (file: File) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    const data = arrayBufferToBase64(await file.arrayBuffer());
+    wsRef.current.send(JSON.stringify({
+      type: 'study_store_upload',
+      sessionId: session.id,
+      deviceId,
+      payload: {
+        file: {
+          id: `study-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          name: file.name,
+          type: file.type || 'application/octet-stream',
+          size: file.size,
+          data,
+        },
+      },
+      timestamp: Date.now(),
+    }));
+  };
+
+  const sendStudySync = (mode: 'page' | 'scroll' | 'highlight', value: number | string) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    wsRef.current.send(JSON.stringify({
+      type: 'study_sync',
+      sessionId: session.id,
+      deviceId,
+      payload: { mode, value },
+      timestamp: Date.now(),
+    }));
+  };
+
   const handleDragStart = (e: React.DragEvent, item: any) => {
     setDraggedItem(item);
     e.dataTransfer.effectAllowed = 'move';
@@ -1602,8 +1712,8 @@ export default function DeviceTiles({
           <button className="btn-leave" onClick={handleLeaveSession}>
             Leave Session
           </button>
-          <button className="btn-chat" onClick={() => setIsChatOpen((prev) => !prev)}>
-            Chat {chatUnreadCount > 0 ? `(${chatUnreadCount})` : ''}
+          <button className="btn-chat" onClick={() => setIsStudyOpen((prev) => !prev)}>
+            Study
           </button>
         </div>
       </div>
@@ -1647,6 +1757,100 @@ export default function DeviceTiles({
             <button onClick={sendChatMessage}>Send</button>
           </div>
         </div>
+      </div>
+      <div className={`study-panel ${isStudyOpen ? 'open' : ''}`}>
+        <div className="chat-inline-header">
+          <h3>Study</h3>
+          <button className="chat-close-btn" onClick={() => setIsStudyOpen(false)}>×</button>
+        </div>
+        <div className="study-tabs">
+          <button className={activeStudyTab === 'store' ? 'active' : ''} onClick={() => setActiveStudyTab('store')}>Store</button>
+          <button className={activeStudyTab === 'room' ? 'active' : ''} onClick={() => setActiveStudyTab('room')}>Study Room</button>
+        </div>
+        {activeStudyTab === 'store' ? (
+          <div className="study-store">
+            <label className="study-upload-btn">
+              Upload Docs
+              <input
+                type="file"
+                accept=".pdf,.doc,.docx,.txt,.ppt,.pptx"
+                hidden
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void uploadStudyFile(file);
+                  e.currentTarget.value = '';
+                }}
+              />
+            </label>
+            <div className="study-store-list">
+              {studyFiles.map((file) => (
+                <div key={file.id} className="study-file-row">
+                  <div>
+                    <strong>{file.name}</strong>
+                    <small>{Math.max(1, Math.round(file.size / 1024))} KB</small>
+                  </div>
+                  <div className="study-file-actions">
+                    <button onClick={() => downloadStudyFile(file)}>Download</button>
+                    {session.createdBy === deviceId && (
+                      <button
+                        className="danger"
+                        onClick={() => wsRef.current?.send(JSON.stringify({
+                          type: 'study_store_delete',
+                          sessionId: session.id,
+                          deviceId,
+                          payload: { fileId: file.id },
+                          timestamp: Date.now(),
+                        }))}
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="study-room">
+            <label>Page</label>
+            <input
+              type="number"
+              min={1}
+              value={studyPage}
+              onChange={(e) => {
+                const value = Math.max(1, Number(e.target.value) || 1);
+                setStudyPage(value);
+                sendStudySync('page', value);
+              }}
+            />
+            <label>Scroll Sync: {studyScroll}%</label>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={studyScroll}
+              onChange={(e) => {
+                const value = Number(e.target.value);
+                setStudyScroll(value);
+                sendStudySync('scroll', value);
+              }}
+            />
+            <label>Highlight</label>
+            <textarea
+              value={studyHighlight}
+              placeholder="Shared highlight/note"
+              onChange={(e) => {
+                setStudyHighlight(e.target.value);
+                sendStudySync('highlight', e.target.value);
+              }}
+            />
+          </div>
+        )}
+      </div>
+      <div className="floating-chat-button-wrap">
+        <button className="floating-chat-button" onClick={() => setIsChatOpen((prev) => !prev)}>
+          Chat {chatUnreadCount > 0 ? `(${chatUnreadCount})` : ''}
+        </button>
       </div>
 
       {/* Show QR code for session creator */}

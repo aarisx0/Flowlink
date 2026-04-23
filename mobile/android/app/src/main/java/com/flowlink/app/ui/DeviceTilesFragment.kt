@@ -10,6 +10,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.text.Editable
 import android.text.TextWatcher
+import android.graphics.Color
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
@@ -40,6 +41,7 @@ class DeviceTilesFragment : Fragment() {
     private var deviceAdapter: DeviceTileAdapter? = null
     private var pendingFileTargetDeviceId: String? = null
     private var isChatOpen = false
+    private val transferClearRunnables = mutableMapOf<String, Runnable>()
     private val typingByDevice = mutableMapOf<String, Boolean>()
     private var chatTypingStopRunnable: Runnable? = null
     private var typingIndicatorRunnable: Runnable? = null
@@ -118,7 +120,7 @@ class DeviceTilesFragment : Fragment() {
         binding.btnInviteOthers.setOnClickListener {
             showInvitationDialog()
         }
-        binding.btnChat.setOnClickListener {
+        binding.btnChatFab.setOnClickListener {
             isChatOpen = !isChatOpen
             toggleChatPanel(isChatOpen)
             if (isChatOpen) {
@@ -199,6 +201,16 @@ class DeviceTilesFragment : Fragment() {
                         completed = progress.progress >= 100
                     )
                     updateDeviceList()
+                    if ((progress.progress >= 100 || progress.transferredBytes >= progress.totalBytes) && progress.direction == "receiving") {
+                        val clearRunnable = Runnable {
+                            transferStatuses.remove(targetId)
+                            updateDeviceList()
+                            transferClearRunnables.remove(targetId)
+                        }
+                        transferClearRunnables[targetId]?.let { binding.root.removeCallbacks(it) }
+                        transferClearRunnables[targetId] = clearRunnable
+                        binding.root.postDelayed(clearRunnable, 1200)
+                    }
                 }
             }
             viewLifecycleOwner.lifecycleScope.launch {
@@ -557,7 +569,13 @@ class DeviceTilesFragment : Fragment() {
     private fun updateChatBadge() {
         val selfId = sessionManager?.getDeviceId().orEmpty()
         val unread = chatMessages.count { it.sourceDevice != selfId && !it.seen }
-        binding.btnChat.text = if (unread > 0 && !isChatOpen) "Chat ($unread)" else "Chat"
+        if (unread > 0 && !isChatOpen) {
+            binding.btnChatFab.setColorFilter(Color.parseColor("#1D4ED8"))
+            binding.btnChatFab.contentDescription = "Chat ($unread unread)"
+        } else {
+            binding.btnChatFab.setColorFilter(Color.WHITE)
+            binding.btnChatFab.contentDescription = "Chat"
+        }
     }
 
     private fun renderTypingIndicator() {
@@ -624,6 +642,8 @@ class DeviceTilesFragment : Fragment() {
         chatTypingStopRunnable = null
         typingIndicatorRunnable?.let { binding.tvChatTyping.removeCallbacks(it) }
         typingIndicatorRunnable = null
+        transferClearRunnables.values.forEach { binding.root.removeCallbacks(it) }
+        transferClearRunnables.clear()
         _binding = null
         sessionManager = null
         deviceAdapter = null

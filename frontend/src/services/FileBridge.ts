@@ -14,6 +14,7 @@ export default class FileBridge {
   private webrtcManager: WebRTCManager;
   private activeTransfers: Map<string, FileTransfer> = new Map();
   private readonly CHUNK_SIZE = 64 * 1024; // 64KB chunks
+  private readonly MAX_UNACKED_BYTES = 1024 * 1024; // 1MB in-flight window
 
   constructor(webrtcManager: WebRTCManager) {
     this.webrtcManager = webrtcManager;
@@ -35,6 +36,7 @@ export default class FileBridge {
       targetDeviceId,
       totalSize: file.size,
       transferred: 0,
+      acknowledged: 0,
       onProgress,
       cancelled: false,
       startedAt: Date.now(),
@@ -81,6 +83,11 @@ export default class FileBridge {
         
         // Send chunk via WebRTC
         try {
+          await this.waitForAckWindow(transfer);
+          // Keep the UI thread and socket producer from overwhelming mobile receivers.
+          if (chunkIndex > 0 && chunkIndex % 8 === 0) {
+            await new Promise((resolve) => window.setTimeout(resolve, 1));
+          }
           await this.sendChunk(transfer.id, chunkIndex, chunkBase64, transfer.targetDeviceId, transfer.file.name, transfer.file.type, transfer.totalSize);
           
           transfer.transferred += chunk.byteLength;
@@ -138,6 +145,15 @@ export default class FileBridge {
       const firstChunk = file.slice(0, this.CHUNK_SIZE);
       reader.readAsArrayBuffer(firstChunk);
     });
+  }
+
+  private async waitForAckWindow(transfer: FileTransfer): Promise<void> {
+    while (!transfer.cancelled && (transfer.transferred - transfer.acknowledged) > this.MAX_UNACKED_BYTES) {
+      await new Promise((resolve) => window.setTimeout(resolve, 12));
+    }
+    if (transfer.cancelled) {
+      throw new Error('Transfer cancelled');
+    }
   }
 
   /**
@@ -208,6 +224,15 @@ export default class FileBridge {
     }
   }
 
+  handleTransferAck(transferId: string, transferredBytes: number, completed = false): void {
+    const transfer = this.activeTransfers.get(transferId);
+    if (!transfer) return;
+    transfer.acknowledged = Math.max(transfer.acknowledged, transferredBytes);
+    if (completed) {
+      transfer.acknowledged = transfer.totalSize;
+    }
+  }
+
   async cancelAllActiveTransfers(reason = 'session_left'): Promise<void> {
     const transfers = Array.from(this.activeTransfers.values());
     for (const transfer of transfers) {
@@ -245,6 +270,7 @@ interface FileTransfer {
   targetDeviceId: string;
   totalSize: number;
   transferred: number;
+  acknowledged: number;
   onProgress?: (stats: TransferStats) => void;
   cancelled: boolean;
   startedAt: number;

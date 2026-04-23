@@ -236,6 +236,12 @@ wss.on('connection', (ws, req) => {
         case 'chat_typing':
           handleChatMessage(ws, message);
           break;
+        case 'study_store_upload':
+        case 'study_store_delete':
+        case 'study_store_list':
+        case 'study_sync':
+          handleStudyMessage(ws, message);
+          break;
           
         case 'ping':
           // Keepalive ping from extension
@@ -1443,6 +1449,85 @@ function handleChatMessage(ws, message) {
       },
       timestamp: Date.now()
     }));
+  }
+}
+
+function handleStudyMessage(ws, message) {
+  const { sessionId, deviceId, type } = message;
+  const session = sessions.get(sessionId);
+  if (!session || !deviceId) {
+    sendError(ws, 'Invalid study session');
+    return;
+  }
+
+  if (!session.studyStore) {
+    session.studyStore = [];
+  }
+
+  if (type === 'study_store_list') {
+    ws.send(JSON.stringify({
+      type: 'study_store_list',
+      sessionId,
+      deviceId,
+      payload: { files: session.studyStore },
+      timestamp: Date.now()
+    }));
+    return;
+  }
+
+  if (type === 'study_store_upload') {
+    const file = message.payload?.file;
+    if (!file?.id || !file?.name || !file?.data) {
+      sendError(ws, 'Invalid store file payload');
+      return;
+    }
+    const next = session.studyStore.filter((item) => item.id !== file.id);
+    next.push({
+      ...file,
+      uploadedBy: deviceId,
+      uploadedAt: Date.now()
+    });
+    session.studyStore = next;
+    broadcastToSession(sessionId, {
+      type: 'study_store_list',
+      sessionId,
+      payload: { files: session.studyStore },
+      timestamp: Date.now()
+    });
+    return;
+  }
+
+  if (type === 'study_store_delete') {
+    const fileId = message.payload?.fileId;
+    if (!fileId) {
+      sendError(ws, 'Missing fileId');
+      return;
+    }
+    // Only host can delete for everyone.
+    if (deviceId !== session.createdBy) {
+      sendError(ws, 'Only host can delete store files');
+      return;
+    }
+    session.studyStore = session.studyStore.filter((item) => item.id !== fileId);
+    broadcastToSession(sessionId, {
+      type: 'study_store_list',
+      sessionId,
+      payload: { files: session.studyStore },
+      timestamp: Date.now()
+    });
+    return;
+  }
+
+  if (type === 'study_sync') {
+    broadcastToSession(sessionId, {
+      type: 'study_sync',
+      sessionId,
+      payload: {
+        ...message.payload,
+        sourceDevice: deviceId
+      },
+      timestamp: Date.now()
+    }, deviceId);
   }
 }
 

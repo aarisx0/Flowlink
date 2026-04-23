@@ -12,6 +12,8 @@ export default class WebRTCManager {
   private ws: WebSocket;
   private peers: Map<string, RTCPeerConnection> = new Map();
   private dataChannels: Map<string, RTCDataChannel> = new Map();
+  private readonly DEFAULT_MAX_BUFFERED = 4 * 1024 * 1024;
+  private readonly FILE_CHUNK_MAX_BUFFERED = 512 * 1024;
 
   constructor(ws: WebSocket, deviceId: string, sessionId: string) {
     this.deviceId = deviceId;
@@ -81,19 +83,26 @@ export default class WebRTCManager {
   async sendRawMessageViaWebSocket(message: string): Promise<void> {
     try {
       const parsed = JSON.parse(message);
+      const maxBufferedAmount =
+        parsed?.type === 'file_transfer_chunk'
+          ? this.FILE_CHUNK_MAX_BUFFERED
+          : this.DEFAULT_MAX_BUFFERED;
       await this.sendViaWebSocketWithBackpressure(JSON.stringify({
         ...parsed,
         sessionId: this.sessionId,
         deviceId: this.deviceId,
-      }));
+      }), maxBufferedAmount);
     } catch {
       await this.sendViaWebSocketWithBackpressure(message);
     }
   }
 
-  private async sendViaWebSocketWithBackpressure(serialized: string): Promise<void> {
+  private async sendViaWebSocketWithBackpressure(
+    serialized: string,
+    maxBufferedAmount = this.DEFAULT_MAX_BUFFERED
+  ): Promise<void> {
     // Prevent huge buffered writes that can disconnect peers on large transfers.
-    while (this.ws.readyState === WebSocket.OPEN && this.ws.bufferedAmount > 4 * 1024 * 1024) {
+    while (this.ws.readyState === WebSocket.OPEN && this.ws.bufferedAmount > maxBufferedAmount) {
       await new Promise((resolve) => window.setTimeout(resolve, 16));
     }
     if (this.ws.readyState !== WebSocket.OPEN) {
