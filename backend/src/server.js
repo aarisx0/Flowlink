@@ -105,6 +105,17 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server });
 
+function sendError(ws, errorMessage) {
+  if (!ws || ws.readyState !== ws.OPEN) {
+    return;
+  }
+  ws.send(JSON.stringify({
+    type: 'error',
+    payload: { message: errorMessage },
+    timestamp: Date.now()
+  }));
+}
+
 server.listen(PORT, () => {
   console.log(`FlowLink backend server running on port ${PORT}`);
   console.log(`Environment: ${NODE_ENV}`);
@@ -154,6 +165,14 @@ wss.on('connection', (ws, req) => {
           
         case 'intent_send':
           handleIntentSend(ws, message);
+          break;
+
+        case 'file_transfer_start':
+        case 'file_transfer_chunk':
+        case 'file_transfer_complete':
+        case 'file_transfer_cancel':
+        case 'file_transfer_ack':
+          handleFileTransferMessage(ws, message);
           break;
           
         case 'media_handoff':
@@ -210,6 +229,13 @@ wss.on('connection', (ws, req) => {
         case 'group_broadcast':
           handleGroupBroadcast(ws, message);
           break;
+
+        case 'chat_message':
+        case 'chat_delivered':
+        case 'chat_seen':
+        case 'chat_typing':
+          handleChatMessage(ws, message);
+          break;
           
         case 'ping':
           // Keepalive ping from extension
@@ -221,6 +247,9 @@ wss.on('connection', (ws, req) => {
         default:
           sendError(ws, `Unknown message type: ${message.type}`);
       }
+      // Keep local connection metadata in sync with handler updates.
+      deviceId = ws.deviceId || message.deviceId || deviceId;
+      sessionId = ws.sessionId || message.sessionId || sessionId;
     } catch (error) {
       console.error('Error processing message:', error);
       sendError(ws, 'Invalid message format');
@@ -228,6 +257,9 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
+    // Use the latest metadata stored on the socket first.
+    deviceId = ws.deviceId || deviceId;
+    sessionId = ws.sessionId || sessionId;
     console.log(`WebSocket closed for device ${deviceId}, session ${sessionId}`);
     
     // Handle device connection cleanup in global registry
@@ -965,6 +997,58 @@ function handleIntentSend(ws, message) {
   }));
 }
 
+function handleFileTransferMessage(ws, message) {
+  const { sessionId, deviceId } = message;
+  let targetDevice = message.payload?.targetDevice;
+  const targetUsername = message.payload?.targetUsername;
+
+  if (!deviceId || (!targetDevice && !targetUsername)) {
+    sendError(ws, 'Missing file transfer routing data');
+    return;
+  }
+
+  if (!targetDevice && targetUsername) {
+    const matches = getOpenConnectionsForUsername(targetUsername.trim(), deviceId);
+    if (matches.length > 0) {
+      targetDevice = matches[0].targetDeviceId;
+    }
+  }
+
+  if (!targetDevice) {
+    sendError(ws, 'Target device not connected');
+    return;
+  }
+
+  const targetWs = deviceConnections.get(targetDevice);
+  if (!targetWs || targetWs.readyState !== targetWs.OPEN) {
+    sendError(ws, 'Target device not connected');
+    return;
+  }
+
+  targetWs.send(JSON.stringify({
+    ...message,
+    deviceId: targetDevice,
+    payload: {
+      ...message.payload,
+      sourceDevice: deviceId,
+      targetDevice,
+    },
+    timestamp: Date.now(),
+  }));
+
+  ws.send(JSON.stringify({
+    type: 'file_transfer_forwarded',
+    sessionId,
+    deviceId,
+    payload: {
+      targetDevice,
+      transferId: message.payload?.transferId,
+      type: message.type,
+    },
+    timestamp: Date.now(),
+  }));
+}
+
 /**
  * Handle device connected notification (notify other devices)
  */
@@ -1317,6 +1401,49 @@ function handleTargetConnectionAck(ws, message) {
     },
     timestamp: Date.now()
   }));
+}
+
+function handleChatMessage(ws, message) {
+  const { sessionId, deviceId, type } = message;
+  const targetDevice = message.payload?.targetDevice;
+
+  if (!sessionId || !deviceId || !targetDevice) {
+    sendError(ws, 'Missing chat routing data');
+    return;
+  }
+
+  const targetWs = deviceConnections.get(targetDevice);
+  if (!targetWs || targetWs.readyState !== targetWs.OPEN) {
+    sendError(ws, 'Target device not connected');
+    return;
+  }
+
+  targetWs.send(JSON.stringify({
+    ...message,
+    sessionId,
+    deviceId: targetDevice,
+    payload: {
+      ...message.payload,
+      sourceDevice: deviceId,
+      targetDevice
+    },
+    timestamp: Date.now()
+  }));
+
+  // Acknowledge delivery for message sends so sender can display double-tick.
+  if (type === 'chat_message') {
+    ws.send(JSON.stringify({
+      type: 'chat_delivered',
+      sessionId,
+      deviceId,
+      payload: {
+        messageId: message.payload?.chat?.messageId,
+        sourceDevice: targetDevice,
+        targetDevice: deviceId
+      },
+      timestamp: Date.now()
+    }));
+  }
 }
 
 /**

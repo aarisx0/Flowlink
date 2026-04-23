@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { Session, Device, Intent, Group } from '@shared/types';
+import { Session, Device, Intent, Group, FileTransferStatus } from '@shared/types';
 import DeviceTile from './DeviceTile';
 import GroupManager from './GroupManager';
 import GroupTile from './GroupTile';
@@ -23,6 +23,17 @@ interface DeviceTilesProps {
   username: string;
   invitationService: InvitationService | null;
   onLeaveSession: () => void;
+}
+
+interface ChatMessageItem {
+  messageId: string;
+  text: string;
+  username: string;
+  sourceDevice: string;
+  targetDevice: string;
+  sentAt: number;
+  delivered: boolean;
+  seen: boolean;
 }
 
 export default function DeviceTiles({
@@ -61,6 +72,12 @@ export default function DeviceTiles({
   const [groups, setGroups] = useState<Group[]>([]);
   const [draggedItem, setDraggedItem] = useState<any>(null);
   const [showInvitationPanel, setShowInvitationPanel] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatInput, setChatInput] = useState('');
+  const [chatMessages, setChatMessages] = useState<ChatMessageItem[]>([]);
+  const [chatUnreadCount, setChatUnreadCount] = useState(0);
+  const [typingByDevice, setTypingByDevice] = useState<Record<string, boolean>>({});
+  const [transferStatuses, setTransferStatuses] = useState<Record<string, FileTransferStatus | null>>({});
   const wsRef = useRef<WebSocket | null>(null);
   const webrtcManagerRef = useRef<WebRTCManager | null>(null);
   const intentRouterRef = useRef<IntentRouter | null>(null);
@@ -68,6 +85,214 @@ export default function DeviceTiles({
   const continuityEngineRef = useRef<ContinuityEngine | null>(null);
   const permissionEngineRef = useRef<PermissionEngine | null>(null);
   const mediaDetectorRef = useRef<MediaDetector | null>(null);
+  const transferTimersRef = useRef<Map<string, number>>(new Map());
+  const incomingTransferBuffersRef = useRef<Map<string, { fileName: string; fileType: string; totalBytes: number; startedAt: number; chunks: Uint8Array[]; sourceDevice: string; transferredBytes: number; lastAckBytes: number }>>(new Map());
+  const chatBodyRef = useRef<HTMLDivElement | null>(null);
+  const chatTypingStopTimerRef = useRef<number | null>(null);
+
+  const estimateTransferRate = (bytes: number) => Math.max(256 * 1024, 4 * 1024 * 1024 - Math.min(3 * 1024 * 1024, bytes / 8));
+
+  const clearTransferTimer = (deviceId: string) => {
+    const timer = transferTimersRef.current.get(deviceId);
+    if (timer) {
+      window.clearInterval(timer);
+      transferTimersRef.current.delete(deviceId);
+    }
+  };
+
+  const startTransferStatus = (deviceId: string, fileName: string, direction: 'sending' | 'receiving', totalBytes: number) => {
+    clearTransferTimer(deviceId);
+    const speedBytesPerSec = estimateTransferRate(totalBytes);
+    const etaSeconds = Math.max(1, Math.ceil(totalBytes / speedBytesPerSec));
+    const startedAt = Date.now();
+
+    setTransferStatuses((prev) => ({
+      ...prev,
+      [deviceId]: {
+        fileName,
+        direction,
+        progress: 0,
+        totalBytes,
+        transferredBytes: 0,
+        speedBytesPerSec,
+        etaSeconds,
+        startedAt,
+      },
+    }));
+
+    const timer = window.setInterval(() => {
+      const elapsed = (Date.now() - startedAt) / 1000;
+      const progress = Math.min(95, Math.floor((elapsed / etaSeconds) * 100));
+      const transferredBytes = Math.min(totalBytes, Math.floor((totalBytes * progress) / 100));
+      const remaining = Math.max(0, Math.ceil(etaSeconds - elapsed));
+
+      setTransferStatuses((prev) => {
+        const current = prev[deviceId];
+        if (!current) return prev;
+        return {
+          ...prev,
+          [deviceId]: {
+            ...current,
+            progress,
+            transferredBytes,
+            etaSeconds: remaining,
+          },
+        };
+      });
+    }, 250);
+
+    transferTimersRef.current.set(deviceId, timer);
+  };
+
+  const completeTransferStatus = (deviceId: string) => {
+    clearTransferTimer(deviceId);
+    setTransferStatuses((prev) => {
+      const current = prev[deviceId];
+      if (!current) return prev;
+      return {
+        ...prev,
+        [deviceId]: {
+          ...current,
+          progress: 100,
+          transferredBytes: current.totalBytes,
+          etaSeconds: 0,
+          completed: true,
+        },
+      };
+    });
+    window.setTimeout(() => {
+      setTransferStatuses((prev) => {
+        if (!prev[deviceId]) return prev;
+        const next = { ...prev };
+        delete next[deviceId];
+        return next;
+      });
+    }, 1800);
+  };
+
+  const deriveTransferMeta = (intent: Intent) => {
+    if (intent.intent_type === 'file_handoff' && intent.payload.file) {
+      return { fileName: intent.payload.file.name || 'File', totalBytes: intent.payload.file.size || 0 };
+    }
+
+    if (intent.intent_type === 'batch_file_handoff' && intent.payload.files) {
+      return { fileName: `${intent.payload.files.totalFiles} files`, totalBytes: intent.payload.files.totalSize || 0 };
+    }
+
+    return null;
+  };
+
+  const base64ToUint8Array = (base64: string): Uint8Array => {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  };
+
+  const downloadReceivedFile = (fileName: string, fileType: string, chunks: Uint8Array[]) => {
+    const blob = new Blob(chunks as unknown as BlobPart[], { type: fileType || 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName || 'flowlink-file';
+    a.click();
+    // Delay revoke so browser can finish download handoff.
+    window.setTimeout(() => URL.revokeObjectURL(url), 1200);
+  };
+
+  const applyTransferStats = (deviceId: string, stats: FileTransferStatus) => {
+    setTransferStatuses((prev) => ({
+      ...prev,
+      [deviceId]: stats,
+    }));
+
+    if (stats.completed) {
+      clearTransferTimer(deviceId);
+      window.setTimeout(() => {
+        setTransferStatuses((prev) => {
+          if (!prev[deviceId]) return prev;
+          const next = { ...prev };
+          delete next[deviceId];
+          return next;
+        });
+      }, 1800);
+    }
+  };
+
+  const toFile = (fileLike: any): File | null => {
+    if (!fileLike?.name) return null;
+    if (fileLike.localRef instanceof File) {
+      return fileLike.localRef;
+    }
+    if (!fileLike?.data) return null;
+    const raw = fileLike.data;
+    const bytes = raw instanceof ArrayBuffer
+      ? new Uint8Array(raw)
+      : Array.isArray(raw)
+        ? new Uint8Array(raw)
+        : raw?.byteLength
+          ? new Uint8Array(raw)
+          : null;
+    if (!bytes) return null;
+    return new File([bytes], fileLike.name, { type: fileLike.type || 'application/octet-stream' });
+  };
+
+  const sendFileWithProgress = async (deviceId: string, intent: Intent) => {
+    if (!fileBridgeRef.current) {
+      throw new Error('File bridge not ready');
+    }
+
+    if (intent.intent_type === 'file_handoff' && intent.payload.file) {
+      const file = toFile(intent.payload.file);
+      if (!file) throw new Error('Invalid file payload');
+      await fileBridgeRef.current.sendFile(file, deviceId, (stats) => applyTransferStats(deviceId, stats));
+      return;
+    }
+
+    if (intent.intent_type === 'batch_file_handoff' && intent.payload.files) {
+      const files = intent.payload.files.files.map((f) => toFile(f)).filter((f): f is File => Boolean(f));
+      if (!files.length) throw new Error('Invalid batch file payload');
+
+      const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
+      let transferredBytes = 0;
+      const startedAt = Date.now();
+
+      for (const file of files) {
+        await fileBridgeRef.current.sendFile(file, deviceId, (stats) => {
+          const elapsed = Math.max(0.001, (Date.now() - startedAt) / 1000);
+          const combinedTransferred = transferredBytes + stats.transferredBytes;
+          const speedBytesPerSec = combinedTransferred / elapsed;
+          const etaSeconds = Math.max(0, Math.ceil((totalBytes - combinedTransferred) / Math.max(1, speedBytesPerSec)));
+          applyTransferStats(deviceId, {
+            fileName: intent.payload.files?.batchId ? `${intent.payload.files.totalFiles} files` : file.name,
+            direction: 'sending',
+            progress: Math.min(99, Math.round((combinedTransferred / totalBytes) * 100)),
+            totalBytes,
+            transferredBytes: combinedTransferred,
+            speedBytesPerSec,
+            etaSeconds,
+            startedAt,
+            completed: false,
+          });
+        });
+        transferredBytes += file.size;
+      }
+
+      applyTransferStats(deviceId, {
+        fileName: intent.payload.files.batchId ? `${intent.payload.files.totalFiles} files` : 'Files',
+        direction: 'sending',
+        progress: 100,
+        totalBytes,
+        transferredBytes: totalBytes,
+        speedBytesPerSec: totalBytes / Math.max(0.001, (Date.now() - startedAt) / 1000),
+        etaSeconds: 0,
+        startedAt,
+        completed: true,
+      });
+    }
+  };
 
   useEffect(() => {
     // Store session info for RemoteAccess component
@@ -106,14 +331,23 @@ export default function DeviceTiles({
       // Only handle messages that DeviceTiles cares about
       if (['device_connected', 'device_disconnected', 'device_status_update', 
            'intent_received', 'intent_accepted', 'intent_rejected',
-           'group_created', 'group_updated', 'group_deleted'].includes(message.type)) {
+           'file_transfer_progress', 'file_transfer_start', 'file_transfer_chunk', 'file_transfer_complete', 'file_transfer_cancel', 'file_transfer_ack',
+           'group_created', 'group_updated', 'group_deleted', 'chat_typing'].includes(message.type)) {
         handleWebSocketMessage(message);
       }
+    };
+
+    const handleChatEvent = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const message = customEvent.detail?.message;
+      if (!message || !['chat_message', 'chat_delivered', 'chat_seen', 'chat_typing'].includes(message.type)) return;
+      handleWebSocketMessage(message);
     };
 
     if (ws) {
       ws.addEventListener('message', handleDeviceTilesMessage);
     }
+    window.addEventListener('chatMessage', handleChatEvent);
 
     // Initialize WebRTC Manager
     webrtcManagerRef.current = new WebRTCManager(ws, deviceId, session.id);
@@ -139,16 +373,247 @@ export default function DeviceTiles({
       if (ws) {
         ws.removeEventListener('message', handleDeviceTilesMessage);
       }
+      window.removeEventListener('chatMessage', handleChatEvent);
       webrtcManagerRef.current?.cleanup();
       permissionEngineRef.current?.revokeAll();
       mediaDetectorRef.current?.cleanup();
+      transferTimersRef.current.forEach((timer) => window.clearInterval(timer));
+      transferTimersRef.current.clear();
+      if (chatTypingStopTimerRef.current) {
+        window.clearTimeout(chatTypingStopTimerRef.current);
+        chatTypingStopTimerRef.current = null;
+      }
       groupService.cleanup();
     };
   }, [session.code, deviceId, deviceName, deviceType, username]);
 
+  useEffect(() => {
+    if (isChatOpen) {
+      setChatUnreadCount(0);
+      chatBodyRef.current?.scrollTo({ top: chatBodyRef.current.scrollHeight, behavior: 'smooth' });
+    }
+  }, [isChatOpen, chatMessages.length]);
+
+  useEffect(() => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    const targetDevice = Array.from(devices.values()).find((d) => d.id !== deviceId)?.id;
+    if (!targetDevice) return;
+
+    if (chatTypingStopTimerRef.current) {
+      window.clearTimeout(chatTypingStopTimerRef.current);
+      chatTypingStopTimerRef.current = null;
+    }
+
+    const isTyping = chatInput.trim().length > 0;
+    wsRef.current.send(JSON.stringify({
+      type: 'chat_typing',
+      sessionId: session.id,
+      deviceId,
+      payload: {
+        targetDevice,
+        isTyping,
+      },
+      timestamp: Date.now(),
+    }));
+
+    if (isTyping) {
+      chatTypingStopTimerRef.current = window.setTimeout(() => {
+        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+        wsRef.current.send(JSON.stringify({
+          type: 'chat_typing',
+          sessionId: session.id,
+          deviceId,
+          payload: {
+            targetDevice,
+            isTyping: false,
+          },
+          timestamp: Date.now(),
+        }));
+        chatTypingStopTimerRef.current = null;
+      }, 1400);
+    }
+  }, [chatInput, deviceId, devices, session.id]);
+
   const handleWebSocketMessage = (message: any) => {
     console.log('DeviceTiles received message:', message.type, message);
     switch (message.type) {
+      case 'file_transfer_progress': {
+        const payload = message.payload || {};
+        const deviceId = payload.deviceId || message.deviceId || payload.sourceDevice;
+        if (deviceId) {
+          applyTransferStats(deviceId, {
+            fileName: payload.fileName || 'File',
+            direction: payload.direction === 'receive' ? 'receiving' : 'sending',
+            progress: payload.progress || 0,
+            totalBytes: payload.totalBytes || 0,
+            transferredBytes: payload.transferredBytes || 0,
+            speedBytesPerSec: payload.speedBytesPerSec || 0,
+            etaSeconds: payload.etaSeconds || 0,
+            startedAt: payload.startedAt || Date.now(),
+            completed: (payload.progress || 0) >= 100,
+          });
+        }
+        break;
+      }
+      case 'file_transfer_start': {
+        const payload = message.payload || {};
+        const transferId = payload.transferId || `${message.timestamp}`;
+        if (transferId) {
+          incomingTransferBuffersRef.current.set(transferId, {
+            fileName: payload.fileName || 'File',
+            fileType: payload.fileType || 'application/octet-stream',
+            totalBytes: payload.totalBytes || 0,
+            startedAt: Date.now(),
+            chunks: [],
+            sourceDevice: payload.sourceDevice || message.deviceId || '',
+            transferredBytes: 0,
+            lastAckBytes: 0,
+          });
+          const deviceId = payload.sourceDevice || message.deviceId || '';
+          if (deviceId) {
+            applyTransferStats(deviceId, {
+              fileName: payload.fileName || 'File',
+              direction: 'receiving',
+              progress: 0,
+              totalBytes: payload.totalBytes || 0,
+              transferredBytes: 0,
+              speedBytesPerSec: 0,
+              etaSeconds: 0,
+              startedAt: Date.now(),
+              completed: false,
+            });
+          }
+        }
+        break;
+      }
+      case 'file_transfer_chunk': {
+        const payload = message.payload || {};
+        const transferId = payload.transferId;
+        const bufferState = incomingTransferBuffersRef.current.get(transferId);
+        if (!bufferState) break;
+
+        const chunk = base64ToUint8Array(payload.data || '');
+        bufferState.chunks.push(chunk);
+        bufferState.transferredBytes += chunk.byteLength;
+        const transferredBytes = bufferState.transferredBytes;
+        const elapsed = Math.max(0.001, (Date.now() - bufferState.startedAt) / 1000);
+        const speedBytesPerSec = transferredBytes / elapsed;
+        const etaSeconds = Math.max(0, Math.ceil((bufferState.totalBytes - transferredBytes) / Math.max(1, speedBytesPerSec)));
+        const progress = bufferState.totalBytes > 0 ? Math.min(99, Math.round((transferredBytes / bufferState.totalBytes) * 100)) : 0;
+        const deviceId = bufferState.sourceDevice;
+
+        if (deviceId) {
+          applyTransferStats(deviceId, {
+            fileName: bufferState.fileName,
+            direction: 'receiving',
+            progress,
+            totalBytes: bufferState.totalBytes,
+            transferredBytes,
+            speedBytesPerSec,
+            etaSeconds,
+            startedAt: bufferState.startedAt,
+            completed: false,
+          });
+        }
+        if (
+          wsRef.current?.readyState === WebSocket.OPEN &&
+          transferId &&
+          transferredBytes - bufferState.lastAckBytes >= 512 * 1024
+        ) {
+          bufferState.lastAckBytes = transferredBytes;
+          wsRef.current.send(JSON.stringify({
+            type: 'file_transfer_ack',
+            sessionId: session.id,
+            deviceId,
+            payload: {
+              transferId,
+              targetDevice: bufferState.sourceDevice,
+              transferredBytes,
+              totalBytes: bufferState.totalBytes,
+              progress,
+            },
+            timestamp: Date.now(),
+          }));
+        }
+        break;
+      }
+      case 'file_transfer_complete': {
+        const payload = message.payload || {};
+        const transferId = payload.transferId;
+        const bufferState = incomingTransferBuffersRef.current.get(transferId);
+        if (!bufferState) break;
+        incomingTransferBuffersRef.current.delete(transferId);
+
+        const deviceId = bufferState.sourceDevice;
+        downloadReceivedFile(bufferState.fileName, bufferState.fileType, bufferState.chunks);
+
+        if (deviceId) {
+          applyTransferStats(deviceId, {
+            fileName: bufferState.fileName,
+            direction: 'receiving',
+            progress: 100,
+            totalBytes: bufferState.totalBytes,
+            transferredBytes: bufferState.totalBytes,
+            speedBytesPerSec: bufferState.totalBytes / Math.max(0.001, (Date.now() - bufferState.startedAt) / 1000),
+            etaSeconds: 0,
+            startedAt: bufferState.startedAt,
+            completed: true,
+          });
+        }
+        if (wsRef.current?.readyState === WebSocket.OPEN && transferId) {
+          wsRef.current.send(JSON.stringify({
+            type: 'file_transfer_ack',
+            sessionId: session.id,
+            deviceId,
+            payload: {
+              transferId,
+              targetDevice: bufferState.sourceDevice,
+              transferredBytes: bufferState.totalBytes,
+              totalBytes: bufferState.totalBytes,
+              progress: 100,
+              completed: true,
+            },
+            timestamp: Date.now(),
+          }));
+        }
+
+        break;
+      }
+      case 'file_transfer_ack': {
+        const payload = message.payload || {};
+        const source = payload.sourceDevice || message.deviceId || payload.targetDevice;
+        if (!source) break;
+        const totalBytes = payload.totalBytes || 0;
+        const transferredBytes = payload.transferredBytes || 0;
+        const progress = totalBytes > 0 ? Math.min(100, Math.round((transferredBytes / totalBytes) * 100)) : (payload.progress || 0);
+        const current = transferStatuses[source];
+        applyTransferStats(source, {
+          fileName: current?.fileName || payload.fileName || 'File',
+          direction: 'sending',
+          progress,
+          totalBytes: totalBytes || current?.totalBytes || 0,
+          transferredBytes: transferredBytes || current?.transferredBytes || 0,
+          speedBytesPerSec: current?.speedBytesPerSec || 0,
+          etaSeconds: payload.completed ? 0 : (current?.etaSeconds || 0),
+          startedAt: current?.startedAt || Date.now(),
+          completed: Boolean(payload.completed) || progress >= 100,
+        });
+        break;
+      }
+      case 'file_transfer_cancel': {
+        const payload = message.payload || {};
+        const source = payload.sourceDevice || message.deviceId;
+        if (source) {
+          clearTransferTimer(source);
+          setTransferStatuses((prev) => {
+            if (!prev[source]) return prev;
+            const next = { ...prev };
+            delete next[source];
+            return next;
+          });
+        }
+        break;
+      }
       case 'device_connected':
         const newDevice: Device = message.payload.device;
         console.log('Device connected:', newDevice);
@@ -174,6 +639,13 @@ export default function DeviceTiles({
           console.log('Device disconnected and removed:', deviceId);
           return updated;
         });
+        clearTransferTimer(message.payload.deviceId);
+        setTransferStatuses((prev) => {
+          if (!prev[message.payload.deviceId]) return prev;
+          const next = { ...prev };
+          delete next[message.payload.deviceId];
+          return next;
+        });
         break;
 
       case 'device_status_update':
@@ -188,6 +660,58 @@ export default function DeviceTiles({
       case 'intent_received':
         handleIncomingIntent(message.payload.intent, message.payload.sourceDevice);
         break;
+      case 'chat_message': {
+        const chat = message.payload?.chat;
+        if (!chat?.messageId || !chat?.text) break;
+        if (message.payload?.sourceDevice) {
+          setTypingByDevice((prev) => ({ ...prev, [message.payload.sourceDevice]: false }));
+        }
+        setChatMessages((prev) => prev.concat({
+          messageId: chat.messageId,
+          text: chat.text,
+          username: chat.username || 'Unknown',
+          sourceDevice: message.payload?.sourceDevice || '',
+          targetDevice: deviceId,
+          sentAt: chat.sentAt || Date.now(),
+          delivered: true,
+          seen: isChatOpen,
+        }));
+        if (!isChatOpen) {
+          setChatUnreadCount((prev) => prev + 1);
+        }
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({
+            type: isChatOpen ? 'chat_seen' : 'chat_delivered',
+            sessionId: session.id,
+            deviceId,
+            payload: {
+              messageId: chat.messageId,
+              targetDevice: message.payload?.sourceDevice,
+            },
+            timestamp: Date.now(),
+          }));
+        }
+        break;
+      }
+      case 'chat_delivered': {
+        const messageId = message.payload?.messageId;
+        if (!messageId) break;
+        setChatMessages((prev) => prev.map((item) => item.messageId === messageId ? { ...item, delivered: true } : item));
+        break;
+      }
+      case 'chat_seen': {
+        const messageId = message.payload?.messageId;
+        if (!messageId) break;
+        setChatMessages((prev) => prev.map((item) => item.messageId === messageId ? { ...item, delivered: true, seen: true } : item));
+        break;
+      }
+      case 'chat_typing': {
+        const source = message.payload?.sourceDevice || '';
+        if (!source) break;
+        const isTyping = Boolean(message.payload?.isTyping);
+        setTypingByDevice((prev) => ({ ...prev, [source]: isTyping }));
+        break;
+      }
 
       case 'session_invitation':
         // Handle incoming session invitation
@@ -305,6 +829,11 @@ export default function DeviceTiles({
     console.log('  Source device ID:', sourceDevice);
     console.log('  Current devices map size:', devices.size);
     console.log('  Devices in map:', Array.from(devices.entries()).map(([id, d]) => `${id.substring(0, 8)}...: ${d.name}`));
+
+    const transferMeta = deriveTransferMeta(intent);
+    if (transferMeta) {
+      startTransferStatus(sourceDevice, transferMeta.fileName, 'receiving', transferMeta.totalBytes);
+    }
     
     // Show permission request UI
     const granted = await requestPermission(intent, sourceDevice);
@@ -315,6 +844,10 @@ export default function DeviceTiles({
       
       // Process intent
       await processIntent(intent, sourceDevice);
+
+      if (transferMeta) {
+        completeTransferStatus(sourceDevice);
+      }
       
       // Send acknowledgment
       if (wsRef.current) {
@@ -330,6 +863,9 @@ export default function DeviceTiles({
         }));
       }
     } else {
+      if (transferMeta) {
+        completeTransferStatus(sourceDevice);
+      }
       // Send rejection
       if (wsRef.current) {
         wsRef.current.send(JSON.stringify({
@@ -926,6 +1462,62 @@ export default function DeviceTiles({
     // Could show toast notification
   };
 
+  const sendChatMessage = () => {
+    const text = chatInput.trim();
+    if (!text || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    const targetDevice = deviceArray[0]?.id;
+    if (!targetDevice) return;
+    const messageId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const sentAt = Date.now();
+    setChatMessages((prev) => prev.concat({
+      messageId,
+      text,
+      username,
+      sourceDevice: deviceId,
+      targetDevice,
+      sentAt,
+      delivered: false,
+      seen: false,
+    }));
+    setChatInput('');
+    setTypingByDevice((prev) => ({ ...prev, [deviceId]: false }));
+    wsRef.current.send(JSON.stringify({
+      type: 'chat_message',
+      sessionId: session.id,
+      deviceId,
+      payload: {
+        targetDevice,
+        chat: {
+          messageId,
+          text,
+          username,
+          sentAt,
+          format: 'plain',
+        },
+      },
+      timestamp: Date.now(),
+    }));
+  };
+
+  const renderChatText = (text: string) => {
+    const lines = text.split('\n');
+    const isCodeBlock = text.includes('```') || lines.length > 4;
+    if (isCodeBlock) {
+      return <pre className="chat-code">{text.replace(/```/g, '')}</pre>;
+    }
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const parts = text.split(urlRegex);
+    return (
+      <span>
+        {parts.map((part, index) => (
+          /^https?:\/\//.test(part)
+            ? <a key={`chat-link-${index}`} href={part} target="_blank" rel="noreferrer">{part}</a>
+            : <span key={`chat-text-${index}`}>{part}</span>
+        ))}
+      </span>
+    );
+  };
+
   const handleDragStart = (e: React.DragEvent, item: any) => {
     setDraggedItem(item);
     e.dataTransfer.effectAllowed = 'move';
@@ -936,6 +1528,7 @@ export default function DeviceTiles({
   };
 
   const handleLeaveSession = () => {
+    void fileBridgeRef.current?.cancelAllActiveTransfers('session_left');
     // Don't close the App-level WebSocket, just leave the session
     const appWs = (window as any).appWebSocket;
     if (appWs && appWs.readyState === WebSocket.OPEN) {
@@ -995,6 +1588,7 @@ export default function DeviceTiles({
   };
 
   const deviceArray = Array.from(devices.values()).filter(d => d.id !== deviceId);
+  const activeTypingDevice = deviceArray.find((d) => typingByDevice[d.id]);
 
   return (
     <div className="device-tiles-container">
@@ -1008,6 +1602,50 @@ export default function DeviceTiles({
           <button className="btn-leave" onClick={handleLeaveSession}>
             Leave Session
           </button>
+          <button className="btn-chat" onClick={() => setIsChatOpen((prev) => !prev)}>
+            Chat {chatUnreadCount > 0 ? `(${chatUnreadCount})` : ''}
+          </button>
+        </div>
+      </div>
+      <div className={`chat-split-panel ${isChatOpen ? 'open' : ''}`}>
+        <div className="chat-inline-header">
+          <h3>Session Chat</h3>
+          <button className="chat-close-btn" onClick={() => setIsChatOpen(false)}>×</button>
+        </div>
+        <div className="chat-panel">
+          <div className="chat-messages" ref={chatBodyRef}>
+            {chatMessages.map((item) => {
+              const own = item.sourceDevice === deviceId;
+              return (
+                <div key={item.messageId} className={`chat-bubble ${own ? 'own' : 'other'}`}>
+                  <div className="chat-meta">
+                    <span>{own ? 'You' : item.username}</span>
+                    <span>{new Date(item.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  </div>
+                  <div className="chat-text">{renderChatText(item.text)}</div>
+                  {own && (
+                    <div className={`chat-tick ${item.seen ? 'seen' : item.delivered ? 'delivered' : ''}`}>
+                      {item.seen ? '✓✓' : item.delivered ? '✓✓' : '✓'}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {activeTypingDevice && (
+              <div className="chat-typing-indicator">
+                <span>{activeTypingDevice.name} is typing</span>
+                <span className="typing-dots"><i /><i /><i /></span>
+              </div>
+            )}
+          </div>
+          <div className="chat-input-row">
+            <textarea
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              placeholder="Type message, code, or link..."
+            />
+            <button onClick={sendChatMessage}>Send</button>
+          </div>
         </div>
       </div>
 
@@ -1088,6 +1726,7 @@ export default function DeviceTiles({
                   draggedItem={draggedItem}
                   onDragStart={handleDragStart}
                   onDragEnd={handleDragEnd}
+                  transferStatus={transferStatuses[device.id]}
                   onDrop={async (intent) => {
                     console.log('=== DeviceTiles onDrop Handler ===');
                     console.log('Intent received:', intent.intent_type);
@@ -1100,14 +1739,22 @@ export default function DeviceTiles({
                     }
                     
                     try {
-                      // Grant permission on TARGET device when sending intent
-                      // This shows that we're sending this type of content to them
-                      console.log('Granting permission for intent type:', intent.intent_type, 'on target device:', device.id);
-                      grantPermissionForIntent(intent, device.id); // Grant permission on TARGET device
-                      
-                      console.log('Routing intent to device:', device.id);
-                      await intentRouterRef.current.routeIntent(intent, device.id);
-                      console.log('✅ Intent routed successfully');
+                      const transferMeta = deriveTransferMeta(intent);
+
+                      if (transferMeta && (intent.intent_type === 'file_handoff' || intent.intent_type === 'batch_file_handoff')) {
+                        console.log('Sending file via chunked transfer to device:', device.id);
+                        await sendFileWithProgress(device.id, intent);
+                        console.log('✅ File transfer completed');
+                      } else {
+                        // Grant permission on TARGET device when sending intent
+                        // This shows that we're sending this type of content to them
+                        console.log('Granting permission for intent type:', intent.intent_type, 'on target device:', device.id);
+                        grantPermissionForIntent(intent, device.id); // Grant permission on TARGET device
+
+                        console.log('Routing intent to device:', device.id);
+                        await intentRouterRef.current.routeIntent(intent, device.id);
+                        console.log('✅ Intent routed successfully');
+                      }
                       
                       // Show success feedback
                       const intentTypeNames: Record<string, string> = {
@@ -1122,6 +1769,15 @@ export default function DeviceTiles({
                       console.log(`✅ ${typeName} sent to ${device.name}`);
                     } catch (error) {
                       console.error('❌ Error routing intent:', error);
+                      if (intent.intent_type === 'file_handoff' || intent.intent_type === 'batch_file_handoff') {
+                        clearTransferTimer(device.id);
+                        setTransferStatuses((prev) => {
+                          if (!prev[device.id]) return prev;
+                          const next = { ...prev };
+                          delete next[device.id];
+                          return next;
+                        });
+                      }
                       alert('Failed to send: ' + error);
                     }
                   }}

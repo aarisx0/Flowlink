@@ -57,6 +57,51 @@ export default class WebRTCManager {
     }));
   }
 
+  async sendRawMessage(message: unknown): Promise<void> {
+    const serialized = typeof message === 'string' ? message : JSON.stringify(message);
+
+    const targetDeviceId = (() => {
+      try {
+        const parsed = typeof message === 'string' ? JSON.parse(message) : message as any;
+        return parsed?.payload?.targetDevice || parsed?.targetDevice || parsed?.target_device || '';
+      } catch {
+        return '';
+      }
+    })();
+
+    const dataChannel = targetDeviceId ? this.dataChannels.get(targetDeviceId) : null;
+    if (dataChannel && dataChannel.readyState === 'open') {
+      dataChannel.send(serialized);
+      return;
+    }
+
+    await this.sendViaWebSocketWithBackpressure(serialized);
+  }
+
+  async sendRawMessageViaWebSocket(message: string): Promise<void> {
+    try {
+      const parsed = JSON.parse(message);
+      await this.sendViaWebSocketWithBackpressure(JSON.stringify({
+        ...parsed,
+        sessionId: this.sessionId,
+        deviceId: this.deviceId,
+      }));
+    } catch {
+      await this.sendViaWebSocketWithBackpressure(message);
+    }
+  }
+
+  private async sendViaWebSocketWithBackpressure(serialized: string): Promise<void> {
+    // Prevent huge buffered writes that can disconnect peers on large transfers.
+    while (this.ws.readyState === WebSocket.OPEN && this.ws.bufferedAmount > 4 * 1024 * 1024) {
+      await new Promise((resolve) => window.setTimeout(resolve, 16));
+    }
+    if (this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket is not open');
+    }
+    this.ws.send(serialized);
+  }
+
   /**
    * Initiate WebRTC connection with target device
    */

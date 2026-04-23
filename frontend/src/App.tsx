@@ -99,6 +99,16 @@ function App() {
         });
         window.dispatchEvent(sessionEvent);
         break;
+      case 'chat_message':
+      case 'chat_delivered':
+      case 'chat_seen':
+      case 'chat_typing': {
+        const chatEvent = new CustomEvent('chatMessage', {
+          detail: { message }
+        });
+        window.dispatchEvent(chatEvent);
+        break;
+      }
         
       case 'session_invitation':
         // Handle incoming session invitation

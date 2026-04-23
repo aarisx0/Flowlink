@@ -31,3 +31,26 @@ data class Intent(
     val timestamp: Long
 )
 
+data class TransferStatus(
+    val fileName: String,
+    val direction: String,
+    val progress: Int,
+    val totalBytes: Long,
+    val transferredBytes: Long,
+    val speedBytesPerSec: Long,
+    val etaSeconds: Int,
+    val startedAt: Long,
+    val completed: Boolean = false
+)
+
+data class ChatMessage(
+    val messageId: String,
+    val text: String,
+    val username: String,
+    val sourceDevice: String,
+    val targetDevice: String,
+    val sentAt: Long,
+    val delivered: Boolean = false,
+    val seen: Boolean = false
+)
+

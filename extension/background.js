@@ -21,6 +21,8 @@ let lastClipboardSkipReason = null;
 let lastClipboardSkipAt = 0;
 let targetUsernames = [];
 let targetStatuses = {};
+const extensionTransfers = new Map();
+const TRANSFER_CHUNK_SIZE = 128 * 1024;
 
 function normalizeTargetUsernames(value) {
   const rawValues = Array.isArray(value)
@@ -93,6 +95,137 @@ function sendTargetedMessages(type, payloadBuilder) {
     type,
     payload: payloadBuilder(null)
   })];
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+async function sendFileToTargets(fileName, fileType, arrayBuffer) {
+  if (!targetUsernames.length) {
+    throw new Error('Add at least one receiver username.');
+  }
+  if (!isConnected) {
+    throw new Error('Backend WebSocket is not connected.');
+  }
+
+  const transferId = `ext-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  extensionTransfers.set(transferId, { fileName, totalBytes: arrayBuffer.byteLength, transferredBytes: 0 });
+
+  for (const targetUsername of targetUsernames) {
+    sendMessage({
+      type: 'file_transfer_start',
+      payload: {
+        transferId,
+        fileName,
+        fileType,
+        totalBytes: arrayBuffer.byteLength,
+        targetUsername
+      }
+    });
+  }
+
+  let offset = 0;
+  let chunkIndex = 0;
+  while (offset < arrayBuffer.byteLength) {
+    const nextOffset = Math.min(arrayBuffer.byteLength, offset + TRANSFER_CHUNK_SIZE);
+    const chunk = arrayBuffer.slice(offset, nextOffset);
+    const data = arrayBufferToBase64(chunk);
+    for (const targetUsername of targetUsernames) {
+      sendMessage({
+        type: 'file_transfer_chunk',
+        payload: {
+          transferId,
+          chunkIndex,
+          data,
+          fileName,
+          fileType,
+          totalBytes: arrayBuffer.byteLength,
+          targetUsername
+        }
+      });
+    }
+    offset = nextOffset;
+    chunkIndex += 1;
+    extensionTransfers.set(transferId, { fileName, totalBytes: arrayBuffer.byteLength, transferredBytes: offset });
+    try {
+      chrome.runtime.sendMessage({
+        type: 'extension_file_transfer_progress',
+        data: {
+          transferId,
+          fileName,
+          progress: Math.round((offset / arrayBuffer.byteLength) * 100),
+          transferredBytes: offset,
+          totalBytes: arrayBuffer.byteLength
+        }
+      });
+    } catch (_err) {
+      // popup likely closed
+    }
+  }
+
+  for (const targetUsername of targetUsernames) {
+    sendMessage({
+      type: 'file_transfer_complete',
+      payload: {
+        transferId,
+        fileName,
+        targetUsername
+      }
+    });
+  }
+
+  extensionTransfers.delete(transferId);
+}
+
+function forwardTransferStart({ transferId, fileName, fileType, totalBytes }) {
+  for (const targetUsername of targetUsernames) {
+    sendMessage({
+      type: 'file_transfer_start',
+      payload: {
+        transferId,
+        fileName,
+        fileType,
+        totalBytes,
+        targetUsername
+      }
+    });
+  }
+}
+
+function forwardTransferChunk({ transferId, chunkIndex, data, fileName, fileType, totalBytes }) {
+  for (const targetUsername of targetUsernames) {
+    sendMessage({
+      type: 'file_transfer_chunk',
+      payload: {
+        transferId,
+        chunkIndex,
+        data,
+        fileName,
+        fileType,
+        totalBytes,
+        targetUsername
+      }
+    });
+  }
+}
+
+function forwardTransferComplete({ transferId, fileName }) {
+  for (const targetUsername of targetUsernames) {
+    sendMessage({
+      type: 'file_transfer_complete',
+      payload: {
+        transferId,
+        fileName,
+        targetUsername
+      }
+    });
+  }
 }
 
 // Initialize extension
@@ -915,6 +1048,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendTabHandoff('collection')
           .then((result) => sendResponse(result))
           .catch((error) => sendResponse({ success: false, error: error.message }));
+        break;
+
+      case 'send_file_transfer':
+        sendFileToTargets(request.fileName, request.fileType || 'application/octet-stream', request.arrayBuffer)
+          .then(() => sendResponse({ success: true }))
+          .catch((error) => sendResponse({ success: false, error: error.message }));
+        break;
+      case 'extension_file_transfer_start':
+        forwardTransferStart(request);
+        sendResponse({ success: true });
+        break;
+      case 'extension_file_transfer_chunk':
+        forwardTransferChunk(request);
+        sendResponse({ success: true });
+        break;
+      case 'extension_file_transfer_complete':
+        forwardTransferComplete(request);
+        sendResponse({ success: true });
         break;
         
       case 'disconnect':

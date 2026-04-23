@@ -2,10 +2,14 @@
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  background:
+    radial-gradient(1200px 500px at -10% -20%, rgba(125, 211, 252, 0.25), transparent),
+    radial-gradient(900px 400px at 120% 20%, rgba(167, 139, 250, 0.26), transparent),
+    linear-gradient(160deg, #eef2ff 0%, #f8fafc 45%, #eef2ff 100%);
 }
 
 .app-header {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(15, 23, 42, 0.82);
   backdrop-filter: blur(10px);
   padding: 2rem;
   text-align: center;

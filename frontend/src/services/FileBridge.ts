@@ -25,7 +25,7 @@ export default class FileBridge {
   async sendFile(
     file: File,
     targetDeviceId: string,
-    onProgress?: (progress: number) => void
+    onProgress?: (stats: TransferStats) => void
   ): Promise<void> {
     const transferId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     
@@ -37,25 +37,24 @@ export default class FileBridge {
       transferred: 0,
       onProgress,
       cancelled: false,
+      startedAt: Date.now(),
     };
 
     this.activeTransfers.set(transferId, transfer);
 
-    // Send file metadata first
-    await this.webrtcManager.sendIntent({
-      intent_type: 'file_handoff',
+    // Announce transfer start first
+    await this.webrtcManager.sendRawMessageViaWebSocket(JSON.stringify({
+      type: 'file_transfer_start',
       payload: {
-        file: {
-          name: file.name,
-          size: file.size,
-          type: file.type,
-        },
+        transferId,
+        fileName: file.name,
+        fileType: file.type,
+        totalBytes: file.size,
+        targetDevice: targetDeviceId,
+        sourceDevice: '',
       },
-      target_device: targetDeviceId,
-      source_device: '',
-      auto_open: true,
       timestamp: Date.now(),
-    });
+    }));
 
     // Transfer file in chunks via WebRTC data channel
     await this.transferFileChunks(transfer);
@@ -77,15 +76,29 @@ export default class FileBridge {
         }
 
         const chunk = e.target?.result as ArrayBuffer;
+        const chunkBytes = new Uint8Array(chunk);
+        const chunkBase64 = this.bytesToBase64(chunkBytes);
         
         // Send chunk via WebRTC
         try {
-          await this.sendChunk(transfer.id, chunkIndex, chunk, transfer.targetDeviceId);
+          await this.sendChunk(transfer.id, chunkIndex, chunkBase64, transfer.targetDeviceId, transfer.file.name, transfer.file.type, transfer.totalSize);
           
           transfer.transferred += chunk.byteLength;
-          transfer.onProgress?.(
-            Math.round((transfer.transferred / transfer.totalSize) * 100)
-          );
+          const elapsedSeconds = Math.max(0.001, (Date.now() - transfer.startedAt) / 1000);
+          const speedBytesPerSec = transfer.transferred / elapsedSeconds;
+          const etaSeconds = Math.max(0, Math.ceil((transfer.totalSize - transfer.transferred) / Math.max(1, speedBytesPerSec)));
+          transfer.onProgress?.({
+            fileName: transfer.file.name,
+            // Keep sender below 100 until receiver confirms completion.
+            progress: Math.min(99, Math.round((transfer.transferred / transfer.totalSize) * 100)),
+            totalBytes: transfer.totalSize,
+            transferredBytes: transfer.transferred,
+            speedBytesPerSec,
+            etaSeconds,
+            direction: 'sending',
+            startedAt: transfer.startedAt,
+            completed: false,
+          });
 
           offset += chunk.byteLength;
           chunkIndex++;
@@ -96,7 +109,18 @@ export default class FileBridge {
             reader.readAsArrayBuffer(nextChunk);
           } else {
             // Transfer complete
-            await this.sendTransferComplete(transfer.id, transfer.targetDeviceId);
+            await this.sendTransferComplete(transfer.id, transfer.targetDeviceId, transfer.file.name);
+            transfer.onProgress?.({
+              fileName: transfer.file.name,
+              progress: 99,
+              totalBytes: transfer.totalSize,
+              transferredBytes: transfer.totalSize,
+              speedBytesPerSec: transfer.totalSize / Math.max(0.001, (Date.now() - transfer.startedAt) / 1000),
+              etaSeconds: 0,
+              direction: 'sending',
+              startedAt: transfer.startedAt,
+              completed: false,
+            });
             this.activeTransfers.delete(transfer.id);
             resolve();
           }
@@ -122,29 +146,26 @@ export default class FileBridge {
   private async sendChunk(
     _transferId: string,
     _chunkIndex: number,
-    chunk: ArrayBuffer,
-    targetDeviceId: string
+    chunkBase64: string,
+    targetDeviceId: string,
+    fileName: string,
+    fileType: string,
+    totalSize: number
   ): Promise<void> {
-    // In a real implementation, this would use WebRTC data channel
-    // For now, we'll use the WebRTCManager's sendIntent as a fallback
-    // In production, implement dedicated binary data channel transfer
-    
-    // This is a simplified version - in production, use binary data channels
-    await this.webrtcManager.sendIntent({
-      intent_type: 'file_handoff',
+    await this.webrtcManager.sendRawMessageViaWebSocket(JSON.stringify({
+      type: 'file_transfer_chunk',
       payload: {
-        file: {
-          name: '', // Already sent in metadata
-          size: chunk.byteLength,
-          type: 'application/octet-stream',
-          data: chunk,
-        },
+        transferId: _transferId,
+        chunkIndex: _chunkIndex,
+        data: chunkBase64,
+        fileName,
+        fileType,
+        totalBytes: totalSize,
+        targetDevice: targetDeviceId,
+        sourceDevice: '',
       },
-      target_device: targetDeviceId,
-      source_device: '',
-      auto_open: false,
       timestamp: Date.now(),
-    });
+    }));
   }
 
   /**
@@ -152,23 +173,28 @@ export default class FileBridge {
    */
   private async sendTransferComplete(
     _transferId: string,
-    targetDeviceId: string
+    targetDeviceId: string,
+    fileName: string
   ): Promise<void> {
-    // Notify target device that transfer is complete
-    await this.webrtcManager.sendIntent({
-      intent_type: 'file_handoff',
+    await this.webrtcManager.sendRawMessageViaWebSocket(JSON.stringify({
+      type: 'file_transfer_complete',
       payload: {
-        file: {
-          name: '',
-          size: 0,
-          type: 'application/x-flowlink-transfer-complete',
-        },
+        transferId: _transferId,
+        fileName,
+        targetDevice: targetDeviceId,
+        sourceDevice: '',
       },
-      target_device: targetDeviceId,
-      source_device: '',
-      auto_open: false,
       timestamp: Date.now(),
-    });
+    }));
+  }
+
+  private bytesToBase64(bytes: Uint8Array): string {
+    let binary = '';
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
   }
 
   /**
@@ -179,6 +205,23 @@ export default class FileBridge {
     if (transfer) {
       transfer.cancelled = true;
       this.activeTransfers.delete(transferId);
+    }
+  }
+
+  async cancelAllActiveTransfers(reason = 'session_left'): Promise<void> {
+    const transfers = Array.from(this.activeTransfers.values());
+    for (const transfer of transfers) {
+      transfer.cancelled = true;
+      await this.webrtcManager.sendRawMessageViaWebSocket(JSON.stringify({
+        type: 'file_transfer_cancel',
+        payload: {
+          transferId: transfer.id,
+          targetDevice: transfer.targetDeviceId,
+          reason,
+        },
+        timestamp: Date.now(),
+      }));
+      this.activeTransfers.delete(transfer.id);
     }
   }
 
@@ -202,8 +245,21 @@ interface FileTransfer {
   targetDeviceId: string;
   totalSize: number;
   transferred: number;
-  onProgress?: (progress: number) => void;
+  onProgress?: (stats: TransferStats) => void;
   cancelled: boolean;
+  startedAt: number;
+}
+
+interface TransferStats {
+  fileName: string;
+  direction: 'sending' | 'receiving';
+  progress: number;
+  totalBytes: number;
+  transferredBytes: number;
+  speedBytesPerSec: number;
+  etaSeconds: number;
+  startedAt: number;
+  completed: boolean;
 }
 
 interface FileSystemEntry {

@@ -8,6 +8,8 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.text.Editable
+import android.text.TextWatcher
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
@@ -15,13 +17,17 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.flowlink.app.MainActivity
 import com.flowlink.app.databinding.FragmentDeviceTilesBinding
+import com.flowlink.app.model.ChatMessage
 import com.flowlink.app.model.Device
+import com.flowlink.app.model.TransferStatus
 import com.flowlink.app.model.Intent as FlowIntent
 import com.flowlink.app.service.SessionManager
 import com.flowlink.app.service.WebSocketManager
 import kotlinx.coroutines.launch
-import org.json.JSONArray
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class DeviceTilesFragment : Fragment() {
     private var _binding: FragmentDeviceTilesBinding? = null
@@ -29,8 +35,14 @@ class DeviceTilesFragment : Fragment() {
     private var sessionId: String? = null
     private var sessionManager: SessionManager? = null
     private val connectedDevices = mutableMapOf<String, Device>()
+    private val transferStatuses = mutableMapOf<String, TransferStatus>()
+    private val chatMessages = mutableListOf<ChatMessage>()
     private var deviceAdapter: DeviceTileAdapter? = null
     private var pendingFileTargetDeviceId: String? = null
+    private var isChatOpen = false
+    private val typingByDevice = mutableMapOf<String, Boolean>()
+    private var chatTypingStopRunnable: Runnable? = null
+    private var typingIndicatorRunnable: Runnable? = null
 
     // Launcher to let the user pick a file/media to send when there is no
     // useful clipboard content available.
@@ -58,34 +70,12 @@ class DeviceTilesFragment : Fragment() {
                 }
             } ?: (uri.lastPathSegment ?: "flowlink-file")
 
-            val type = resolver.getType(uri) ?: "*/*"
-            val bytes = resolver.openInputStream(uri)?.use { it.readBytes() } ?: return@registerForActivityResult
-
-            val dataArray = JSONArray().apply {
-                bytes.forEach { b -> put(b.toInt() and 0xFF) }
-            }
-
-            val fileJson = JSONObject().apply {
-                put("name", name)
-                put("size", bytes.size)
-                put("type", type)
-                put("data", dataArray)
-            }
-
-            val payload = mapOf(
-                "file" to fileJson.toString()
-            )
-
-            val flowIntent = FlowIntent(
-                intentType = "file_handoff",
-                payload = payload,
-                targetDevice = targetDeviceId,
-                sourceDevice = sessionManager?.getDeviceId() ?: "",
-                autoOpen = true,
-                timestamp = System.currentTimeMillis()
-            )
-
-            mainActivity.webSocketManager.sendIntent(flowIntent, targetDeviceId)
+            val type = resolver.getType(uri) ?: "application/octet-stream"
+            val size = resolver.query(uri, null, null, null, null)?.use { cursor ->
+                val sizeIndex = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                if (sizeIndex != -1 && cursor.moveToFirst()) cursor.getLong(sizeIndex) else 0L
+            } ?: 0L
+            mainActivity.webSocketManager.sendFileUri(targetDeviceId, uri, name, type, size)
             Toast.makeText(ctx, "Sent file to device", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             android.util.Log.e("FlowLink", "Failed to send file", e)
@@ -128,13 +118,32 @@ class DeviceTilesFragment : Fragment() {
         binding.btnInviteOthers.setOnClickListener {
             showInvitationDialog()
         }
+        binding.btnChat.setOnClickListener {
+            isChatOpen = !isChatOpen
+            toggleChatPanel(isChatOpen)
+            if (isChatOpen) {
+                markIncomingAsSeen()
+            }
+            updateChatBadge()
+        }
+        binding.btnSendChat.setOnClickListener {
+            sendChatMessage()
+        }
+        binding.etChatInput.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: Editable?) {
+                sendTypingState(s?.toString().orEmpty().isNotBlank())
+            }
+        })
 
         // Setup RecyclerView
         binding.rvDevices.layoutManager = LinearLayoutManager(requireContext())
         deviceAdapter = DeviceTileAdapter(
             devices = emptyList(),
             onDeviceClick = { device -> handleDeviceTileClick(device) },
-            onBrowseFilesClick = { device -> handleBrowseFilesClick(device) }
+            onBrowseFilesClick = { device -> handleBrowseFilesClick(device) },
+            transferStatuses = transferStatuses
         )
         binding.rvDevices.adapter = deviceAdapter
 
@@ -174,6 +183,71 @@ class DeviceTilesFragment : Fragment() {
                     android.util.Log.d("FlowLink", "Updated tile list: ${connectedDevices.keys}")
                 }
             }
+
+            viewLifecycleOwner.lifecycleScope.launch {
+                mainActivity.webSocketManager.fileTransferProgress.collect { progress ->
+                    val targetId = progress?.deviceId ?: return@collect
+                    transferStatuses[targetId] = TransferStatus(
+                        fileName = progress.fileName,
+                        direction = progress.direction,
+                        progress = progress.progress,
+                        totalBytes = progress.totalBytes,
+                        transferredBytes = progress.transferredBytes,
+                        speedBytesPerSec = progress.speedBytesPerSec,
+                        etaSeconds = progress.etaSeconds,
+                        startedAt = progress.startedAt,
+                        completed = progress.progress >= 100
+                    )
+                    updateDeviceList()
+                }
+            }
+            viewLifecycleOwner.lifecycleScope.launch {
+                mainActivity.webSocketManager.chatEvents.collect { event ->
+                    when (event) {
+                        is WebSocketManager.ChatEvent.Message -> {
+                            chatMessages.add(
+                                ChatMessage(
+                                    messageId = event.messageId,
+                                    text = event.text,
+                                    username = event.username,
+                                    sourceDevice = event.sourceDevice,
+                                    targetDevice = event.targetDevice,
+                                    sentAt = event.sentAt,
+                                    delivered = true,
+                                    seen = isChatOpen
+                                )
+                            )
+                            renderChat()
+                            if (isChatOpen) {
+                                mainActivity.webSocketManager.sendChatReceipt("chat_seen", event.messageId, event.sourceDevice)
+                            } else {
+                                mainActivity.webSocketManager.sendChatReceipt("chat_delivered", event.messageId, event.sourceDevice)
+                            }
+                            updateChatBadge()
+                        }
+                        is WebSocketManager.ChatEvent.Delivered -> {
+                            val index = chatMessages.indexOfFirst { it.messageId == event.messageId }
+                            if (index >= 0) {
+                                chatMessages[index] = chatMessages[index].copy(delivered = true)
+                                renderChat()
+                            }
+                        }
+                        is WebSocketManager.ChatEvent.Seen -> {
+                            val index = chatMessages.indexOfFirst { it.messageId == event.messageId }
+                            if (index >= 0) {
+                                chatMessages[index] = chatMessages[index].copy(delivered = true, seen = true)
+                                renderChat()
+                            }
+                        }
+                        is WebSocketManager.ChatEvent.Typing -> {
+                            if (event.sourceDevice.isNotBlank()) {
+                                typingByDevice[event.sourceDevice] = event.isTyping
+                                renderTypingIndicator()
+                            }
+                        }
+                    }
+                }
+            }
             
             // Ensure WebSocket is connected to receive device updates
             val connectionState = mainActivity.webSocketManager.connectionState.value
@@ -203,7 +277,8 @@ class DeviceTilesFragment : Fragment() {
         deviceAdapter = DeviceTileAdapter(
             devices = connectedDevices.values.toList(),
             onDeviceClick = { device -> handleDeviceTileClick(device) },
-            onBrowseFilesClick = { device -> handleBrowseFilesClick(device) }
+            onBrowseFilesClick = { device -> handleBrowseFilesClick(device) },
+            transferStatuses = transferStatuses
         )
         binding.rvDevices.adapter = deviceAdapter
     }
@@ -336,6 +411,38 @@ class DeviceTilesFragment : Fragment() {
         pickFileLauncher.launch(arrayOf("*/*"))
     }
 
+    private fun startTransferStatus(deviceId: String, fileName: String, direction: String, totalBytes: Long) {
+        val speedBytesPerSec = maxOf(256 * 1024L, 4 * 1024 * 1024L - minOf(3 * 1024 * 1024L, totalBytes / 8))
+        val etaSeconds = maxOf(1, kotlin.math.ceil(totalBytes.toDouble() / speedBytesPerSec.toDouble()).toInt())
+        transferStatuses[deviceId] = TransferStatus(
+            fileName = fileName,
+            direction = direction,
+            progress = 0,
+            totalBytes = totalBytes,
+            transferredBytes = 0,
+            speedBytesPerSec = speedBytesPerSec,
+            etaSeconds = etaSeconds,
+            startedAt = System.currentTimeMillis()
+        )
+        updateDeviceList()
+    }
+
+    private fun completeTransferStatus(deviceId: String) {
+        val current = transferStatuses[deviceId] ?: return
+        transferStatuses[deviceId] = current.copy(
+            progress = 100,
+            transferredBytes = current.totalBytes,
+            etaSeconds = 0,
+            completed = true
+        )
+        updateDeviceList()
+
+        binding.root.postDelayed({
+            transferStatuses.remove(deviceId)
+            updateDeviceList()
+        }, 1800)
+    }
+
     private fun isHttpUrl(text: String): Boolean {
         return try {
             val uri = Uri.parse(text)
@@ -387,6 +494,125 @@ class DeviceTilesFragment : Fragment() {
         }
     }
 
+    private fun sendChatMessage() {
+        val mainActivity = activity as? MainActivity ?: return
+        val text = binding.etChatInput.text?.toString()?.trim().orEmpty()
+        if (text.isEmpty()) return
+        val target = connectedDevices.values.firstOrNull { it.online } ?: run {
+            Toast.makeText(requireContext(), "No online device to chat with", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val messageId = "mob-chat-${System.currentTimeMillis()}"
+        chatMessages.add(
+            ChatMessage(
+                messageId = messageId,
+                text = text,
+                username = sessionManager?.getUsername().orEmpty(),
+                sourceDevice = sessionManager?.getDeviceId().orEmpty(),
+                targetDevice = target.id,
+                sentAt = System.currentTimeMillis(),
+                delivered = false,
+                seen = false
+            )
+        )
+        binding.etChatInput.setText("")
+        sendTypingState(false)
+        renderChat()
+        updateChatBadge()
+        mainActivity.webSocketManager.sendChatMessage(target.id, messageId, text)
+    }
+
+    private fun sendTypingState(isTyping: Boolean) {
+        val mainActivity = activity as? MainActivity ?: return
+        val target = connectedDevices.values.firstOrNull { it.online } ?: return
+
+        chatTypingStopRunnable?.let { binding.chatPanel.removeCallbacks(it) }
+        mainActivity.webSocketManager.sendChatTyping(target.id, isTyping)
+
+        if (isTyping) {
+            val stopRunnable = Runnable {
+                val current = binding.etChatInput.text?.toString()?.trim().orEmpty()
+                if (current.isNotEmpty()) {
+                    mainActivity.webSocketManager.sendChatTyping(target.id, false)
+                }
+            }
+            chatTypingStopRunnable = stopRunnable
+            binding.chatPanel.postDelayed(stopRunnable, 1400)
+        }
+    }
+
+    private fun markIncomingAsSeen() {
+        val selfId = sessionManager?.getDeviceId().orEmpty()
+        val mainActivity = activity as? MainActivity
+        for (i in chatMessages.indices) {
+            val msg = chatMessages[i]
+            if (msg.sourceDevice != selfId && !msg.seen) {
+                mainActivity?.webSocketManager?.sendChatReceipt("chat_seen", msg.messageId, msg.sourceDevice)
+                chatMessages[i] = msg.copy(delivered = true, seen = true)
+            }
+        }
+        renderChat()
+    }
+
+    private fun updateChatBadge() {
+        val selfId = sessionManager?.getDeviceId().orEmpty()
+        val unread = chatMessages.count { it.sourceDevice != selfId && !it.seen }
+        binding.btnChat.text = if (unread > 0 && !isChatOpen) "Chat ($unread)" else "Chat"
+    }
+
+    private fun renderTypingIndicator() {
+        val active = connectedDevices.values.firstOrNull { typingByDevice[it.id] == true }
+        if (active == null) {
+            binding.tvChatTyping.text = ""
+            typingIndicatorRunnable?.let { binding.tvChatTyping.removeCallbacks(it) }
+            typingIndicatorRunnable = null
+            return
+        }
+        val dotCount = ((System.currentTimeMillis() / 350L) % 3L).toInt() + 1
+        binding.tvChatTyping.text = "${active.name} is typing${".".repeat(dotCount)}"
+        typingIndicatorRunnable?.let { binding.tvChatTyping.removeCallbacks(it) }
+        val loop = Runnable { renderTypingIndicator() }
+        typingIndicatorRunnable = loop
+        binding.tvChatTyping.postDelayed(loop, 350)
+    }
+
+    private fun toggleChatPanel(open: Boolean) {
+        if (open) {
+            binding.chatPanel.visibility = View.VISIBLE
+            binding.chatPanel.translationY = 18f
+            binding.chatPanel.alpha = 0f
+            binding.chatPanel.animate()
+                .translationY(0f)
+                .alpha(1f)
+                .setDuration(220)
+                .start()
+        } else {
+            binding.chatPanel.animate()
+                .translationY(18f)
+                .alpha(0f)
+                .setDuration(180)
+                .withEndAction {
+                    binding.chatPanel.visibility = View.GONE
+                }
+                .start()
+        }
+    }
+
+    private fun renderChat() {
+        val selfId = sessionManager?.getDeviceId().orEmpty()
+        val formatter = SimpleDateFormat("HH:mm", Locale.getDefault())
+        binding.tvChatMessages.text = buildString {
+            chatMessages.takeLast(200).forEach { msg ->
+                val own = msg.sourceDevice == selfId
+                val sender = if (own) "You" else msg.username
+                val ticks = if (!own) "" else if (msg.seen) " ✓✓ seen" else if (msg.delivered) " ✓✓" else " ✓"
+                append("[${formatter.format(Date(msg.sentAt))}] $sender$ticks\n")
+                append("${msg.text}\n\n")
+            }
+        }
+        binding.chatScroll.post { binding.chatScroll.fullScroll(View.FOCUS_DOWN) }
+    }
+
     private fun showInvitationDialog() {
         val dialog = InvitationDialogFragment.newInstance()
         dialog.show(parentFragmentManager, InvitationDialogFragment.TAG)
@@ -394,6 +620,10 @@ class DeviceTilesFragment : Fragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
+        chatTypingStopRunnable?.let { binding.chatPanel.removeCallbacks(it) }
+        chatTypingStopRunnable = null
+        typingIndicatorRunnable?.let { binding.tvChatTyping.removeCallbacks(it) }
+        typingIndicatorRunnable = null
         _binding = null
         sessionManager = null
         deviceAdapter = null

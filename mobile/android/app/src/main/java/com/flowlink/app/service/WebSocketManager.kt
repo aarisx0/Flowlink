@@ -3,6 +3,7 @@ package com.flowlink.app.service
 import android.util.Log
 import com.flowlink.app.MainActivity
 import com.flowlink.app.model.Intent
+import org.json.JSONArray
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -11,10 +12,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import okhttp3.*
 import okio.ByteString
 import org.json.JSONObject
+import android.util.Base64
+import android.os.SystemClock
 import java.util.concurrent.TimeUnit
+import java.io.File
+import java.io.FileOutputStream
 
 /**
  * WebSocket Manager
@@ -35,8 +41,25 @@ class WebSocketManager(private val mainActivity: MainActivity) {
     private val _receivedIntents = MutableStateFlow<Intent?>(null)
     val receivedIntents: StateFlow<Intent?> = _receivedIntents
 
+    private val _fileTransferProgress = MutableStateFlow<FileTransferProgressEvent?>(null)
+    val fileTransferProgress: StateFlow<FileTransferProgressEvent?> = _fileTransferProgress
+
+    private val fileTransferWriters = mutableMapOf<String, FileOutputStream>()
+    private val fileTransferFiles = mutableMapOf<String, File>()
+    private val fileTransferReceivedBytes = mutableMapOf<String, Long>()
+    private val fileTransferMeta = mutableMapOf<String, FileTransferMeta>()
+    private val transferStartedAt = mutableMapOf<String, Long>()
+    private val fileTransferLastUiUpdateAt = mutableMapOf<String, Long>()
+    private val fileTransferLastAckBytes = mutableMapOf<String, Long>()
+    private val PROGRESS_UPDATE_INTERVAL_MS = 250L
+    private val ACK_INTERVAL_BYTES = 512L * 1024L
+    private val MAX_WS_QUEUE_BYTES = 4L * 1024L * 1024L
+
     private val _sessionCreated = MutableStateFlow<SessionCreatedEvent?>(null)
     val sessionCreated: StateFlow<SessionCreatedEvent?> = _sessionCreated
+
+    private val _chatEvents = MutableSharedFlow<ChatEvent>(extraBufferCapacity = 64)
+    val chatEvents: SharedFlow<ChatEvent> = _chatEvents
 
     // Emits info about devices that connect to the current session
     private val _deviceConnected = MutableStateFlow<DeviceInfo?>(null)
@@ -279,6 +302,181 @@ class WebSocketManager(private val mainActivity: MainActivity) {
         sendMessage(message)
     }
 
+    fun sendRawMessage(message: String) {
+        sendMessage(message)
+    }
+
+    fun sendChatMessage(targetDeviceId: String, messageId: String, text: String) {
+        val currentSessionId = sessionManager.getCurrentSessionId()
+        val payload = JSONObject().apply {
+            put("targetDevice", targetDeviceId)
+            put("chat", JSONObject().apply {
+                put("messageId", messageId)
+                put("text", text)
+                put("username", sessionManager.getUsername())
+                put("sentAt", System.currentTimeMillis())
+                put("format", "plain")
+            })
+        }
+        sendMessage(JSONObject().apply {
+            put("type", "chat_message")
+            put("sessionId", currentSessionId)
+            put("deviceId", sessionManager.getDeviceId())
+            put("payload", payload)
+            put("timestamp", System.currentTimeMillis())
+        }.toString())
+    }
+
+    fun sendChatReceipt(type: String, messageId: String, targetDeviceId: String) {
+        val currentSessionId = sessionManager.getCurrentSessionId()
+        sendMessage(JSONObject().apply {
+            put("type", type)
+            put("sessionId", currentSessionId)
+            put("deviceId", sessionManager.getDeviceId())
+            put("payload", JSONObject().apply {
+                put("messageId", messageId)
+                put("targetDevice", targetDeviceId)
+            })
+            put("timestamp", System.currentTimeMillis())
+        }.toString())
+    }
+
+    fun sendChatTyping(targetDeviceId: String, isTyping: Boolean) {
+        val currentSessionId = sessionManager.getCurrentSessionId()
+        sendMessage(JSONObject().apply {
+            put("type", "chat_typing")
+            put("sessionId", currentSessionId)
+            put("deviceId", sessionManager.getDeviceId())
+            put("payload", JSONObject().apply {
+                put("targetDevice", targetDeviceId)
+                put("isTyping", isTyping)
+            })
+            put("timestamp", System.currentTimeMillis())
+        }.toString())
+    }
+
+    fun sendFileUri(targetDeviceId: String, uri: android.net.Uri, fileName: String, fileType: String, fileSize: Long) {
+        scope.launch {
+            val transferId = "mob-${System.currentTimeMillis()}-${(1000..9999).random()}"
+            try {
+                sendMessageStrict(JSONObject().apply {
+                    put("type", "file_transfer_start")
+                    put("sessionId", sessionManager.getCurrentSessionId())
+                    put("deviceId", sessionManager.getDeviceId())
+                    put("payload", JSONObject().apply {
+                        put("transferId", transferId)
+                        put("fileName", fileName)
+                        put("fileType", fileType)
+                        put("totalBytes", fileSize)
+                        put("targetDevice", targetDeviceId)
+                    })
+                    put("timestamp", System.currentTimeMillis())
+                }.toString())
+
+                val startAt = SystemClock.elapsedRealtime()
+                val initialSessionId = sessionManager.getCurrentSessionId()
+                var sentBytes = 0L
+                val buffer = ByteArray(128 * 1024)
+                mainActivity.contentResolver.openInputStream(uri)?.use { stream ->
+                    var read = stream.read(buffer)
+                    var chunkIndex = 0
+                    while (read > 0) {
+                        if (sessionManager.getCurrentSessionId() != initialSessionId || _connectionState.value !is ConnectionState.Connected) {
+                            throw IllegalStateException("Transfer stopped: session changed or disconnected")
+                        }
+                        waitForWebSocketDrain()
+                        val chunk = buffer.copyOfRange(0, read)
+                        val base64 = Base64.encodeToString(chunk, Base64.NO_WRAP)
+                        sendMessageStrict(JSONObject().apply {
+                            put("type", "file_transfer_chunk")
+                            put("sessionId", sessionManager.getCurrentSessionId())
+                            put("deviceId", sessionManager.getDeviceId())
+                            put("payload", JSONObject().apply {
+                                put("transferId", transferId)
+                                put("chunkIndex", chunkIndex)
+                                put("data", base64)
+                                put("fileName", fileName)
+                                put("fileType", fileType)
+                                put("totalBytes", fileSize)
+                                put("targetDevice", targetDeviceId)
+                            })
+                            put("timestamp", System.currentTimeMillis())
+                        }.toString())
+                        sentBytes += read.toLong()
+                        chunkIndex += 1
+                        val elapsed = ((SystemClock.elapsedRealtime() - startAt) / 1000.0).coerceAtLeast(0.001)
+                        val speed = (sentBytes / elapsed).toLong()
+                        val progress = if (fileSize > 0) ((sentBytes * 100) / fileSize).toInt().coerceIn(0, 99) else 0
+                        val eta = if (speed > 0 && fileSize > sentBytes) (((fileSize - sentBytes).toDouble() / speed.toDouble()).toInt()).coerceAtLeast(0) else 0
+                        _fileTransferProgress.value = FileTransferProgressEvent(
+                            deviceId = targetDeviceId,
+                            fileName = fileName,
+                            direction = "sending",
+                            progress = progress,
+                            totalBytes = fileSize,
+                            transferredBytes = sentBytes,
+                            speedBytesPerSec = speed,
+                            etaSeconds = eta,
+                            startedAt = startAt
+                        )
+                        mainActivity.notificationService.showFileTransferProgress(fileName, progress, "send", sentBytes, fileSize)
+                        read = stream.read(buffer)
+                    }
+                }
+
+                sendMessageStrict(JSONObject().apply {
+                    put("type", "file_transfer_complete")
+                    put("sessionId", sessionManager.getCurrentSessionId())
+                    put("deviceId", sessionManager.getDeviceId())
+                    put("payload", JSONObject().apply {
+                        put("transferId", transferId)
+                        put("fileName", fileName)
+                        put("targetDevice", targetDeviceId)
+                    })
+                    put("timestamp", System.currentTimeMillis())
+                }.toString())
+                _fileTransferProgress.value = FileTransferProgressEvent(
+                    deviceId = targetDeviceId,
+                    fileName = fileName,
+                    direction = "sending",
+                    progress = 100,
+                    totalBytes = fileSize,
+                    transferredBytes = fileSize,
+                    speedBytesPerSec = 0,
+                    etaSeconds = 0,
+                    startedAt = startAt
+                )
+                mainActivity.notificationService.showFileTransferProgress(fileName, 100, "send", fileSize, fileSize)
+                mainActivity.notificationService.clearTransferProgress()
+            } catch (e: Exception) {
+                Log.e("FlowLink", "Failed to stream file", e)
+                sendMessage(JSONObject().apply {
+                    put("type", "file_transfer_cancel")
+                    put("sessionId", sessionManager.getCurrentSessionId())
+                    put("deviceId", sessionManager.getDeviceId())
+                    put("payload", JSONObject().apply {
+                        put("transferId", transferId)
+                        put("targetDevice", targetDeviceId)
+                    })
+                    put("timestamp", System.currentTimeMillis())
+                }.toString())
+            }
+        }
+    }
+
+    private suspend fun waitForWebSocketDrain() {
+        while (webSocket != null && webSocket!!.queueSize() > MAX_WS_QUEUE_BYTES) {
+            delay(16)
+        }
+    }
+
+    private fun sendMessageStrict(message: String) {
+        val ok = webSocket?.send(message) ?: false
+        if (!ok) {
+            throw IllegalStateException("WebSocket send failed")
+        }
+    }
+
     fun setRemoteDesktopManager(manager: RemoteDesktopManager?) {
         remoteDesktopManager = manager
     }
@@ -336,6 +534,228 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                         timestamp = intentJson.getLong("timestamp")
                     )
                     _receivedIntents.value = intent
+                }
+                "chat_message" -> {
+                    val payload = json.getJSONObject("payload")
+                    val chat = payload.optJSONObject("chat") ?: return
+                    val messageId = chat.optString("messageId", "")
+                    val title = chat.optString("username", "Chat")
+                    val text = chat.optString("text", "")
+                    val sourceDevice = payload.optString("sourceDevice", "")
+                    val sentAt = chat.optLong("sentAt", System.currentTimeMillis())
+                    _chatEvents.tryEmit(
+                        ChatEvent.Message(
+                            messageId = messageId,
+                            text = text,
+                            username = title,
+                            sourceDevice = sourceDevice,
+                            targetDevice = sessionManager.getDeviceId(),
+                            sentAt = sentAt
+                        )
+                    )
+                    mainActivity.notificationService.showNotification(title, text)
+                }
+                "chat_read" -> {
+                    // Can be surfaced in UI later; keep the message flow alive.
+                    Log.d("FlowLink", "Chat read receipt received")
+                }
+                "chat_delivered" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    _chatEvents.tryEmit(
+                        ChatEvent.Delivered(
+                            messageId = payload.optString("messageId", ""),
+                            sourceDevice = payload.optString("sourceDevice", "")
+                        )
+                    )
+                }
+                "chat_seen" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    _chatEvents.tryEmit(
+                        ChatEvent.Seen(
+                            messageId = payload.optString("messageId", ""),
+                            sourceDevice = payload.optString("sourceDevice", "")
+                        )
+                    )
+                }
+                "chat_typing" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    _chatEvents.tryEmit(
+                        ChatEvent.Typing(
+                            sourceDevice = payload.optString("sourceDevice", ""),
+                            isTyping = payload.optBoolean("isTyping", false)
+                        )
+                    )
+                }
+                "file_transfer_progress" -> {
+                    val payload = json.getJSONObject("payload")
+                    val fileName = payload.optString("fileName", "File")
+                    val progress = payload.optInt("progress", 0)
+                    val direction = payload.optString("direction", "receive")
+                    val totalBytes = payload.optLong("totalBytes", 0L)
+                    val transferredBytes = payload.optLong("transferredBytes", 0L)
+                    val speedBytesPerSec = payload.optLong("speedBytesPerSec", 0L)
+                    val etaSeconds = payload.optInt("etaSeconds", 0)
+                    val deviceId = payload.optString("deviceId", "")
+                    val startedAt = payload.optLong("startedAt", System.currentTimeMillis())
+
+                    _fileTransferProgress.value = FileTransferProgressEvent(
+                        deviceId = deviceId.ifBlank { null },
+                        fileName = fileName,
+                        direction = direction,
+                        progress = progress,
+                        totalBytes = totalBytes,
+                        transferredBytes = transferredBytes,
+                        speedBytesPerSec = speedBytesPerSec,
+                        etaSeconds = etaSeconds,
+                        startedAt = startedAt,
+                    )
+                    mainActivity.notificationService.showFileTransferProgress(fileName, progress, direction, transferredBytes, totalBytes)
+                    if (progress >= 100) {
+                        mainActivity.notificationService.clearTransferProgress()
+                        _fileTransferProgress.value = null
+                    }
+                }
+                "file_transfer_start" -> {
+                    val payload = json.getJSONObject("payload")
+                    val transferId = payload.optString("transferId", "")
+                    val fileName = payload.optString("fileName", "File")
+                    val fileType = payload.optString("fileType", "application/octet-stream")
+                    val totalBytes = payload.optLong("totalBytes", 0L)
+                    val sourceDevice = payload.optString("sourceDevice", "")
+
+                    if (transferId.isBlank()) return
+
+                    fileTransferMeta[transferId] = FileTransferMeta(fileName, fileType, totalBytes, sourceDevice)
+                    val targetFile = File(mainActivity.cacheDir, "flowlink-${System.currentTimeMillis()}-$fileName")
+                    fileTransferFiles[transferId] = targetFile
+                    fileTransferWriters[transferId] = FileOutputStream(targetFile)
+                    fileTransferReceivedBytes[transferId] = 0L
+                    transferStartedAt[transferId] = SystemClock.elapsedRealtime()
+                    fileTransferLastUiUpdateAt[transferId] = 0L
+                    fileTransferLastAckBytes[transferId] = 0L
+                    _fileTransferProgress.value = FileTransferProgressEvent(
+                        deviceId = sourceDevice.ifBlank { null },
+                        fileName = fileName,
+                        direction = "receiving",
+                        progress = 0,
+                        totalBytes = totalBytes,
+                        transferredBytes = 0,
+                        speedBytesPerSec = 0,
+                        etaSeconds = 0,
+                        startedAt = transferStartedAt[transferId] ?: SystemClock.elapsedRealtime(),
+                    )
+                    mainActivity.notificationService.showFileTransferProgress(fileName, 0, "receive", 0, totalBytes)
+                }
+                "file_transfer_chunk" -> {
+                    val payload = json.getJSONObject("payload")
+                    val transferId = payload.optString("transferId", "")
+                    val data = payload.optString("data", "")
+                    val sourceDevice = payload.optString("sourceDevice", "")
+                    val meta = fileTransferMeta[transferId] ?: return
+                    val writer = fileTransferWriters[transferId] ?: return
+
+                    if (data.isNotBlank()) {
+                        val bytes = Base64.decode(data, Base64.DEFAULT)
+                        writer.write(bytes)
+                        val transferred = (fileTransferReceivedBytes[transferId] ?: 0L) + bytes.size.toLong()
+                        fileTransferReceivedBytes[transferId] = transferred
+                        val progress = if (meta.totalBytes > 0) ((transferred * 100) / meta.totalBytes).toInt().coerceIn(0, 99) else 0
+                        val startedAt = transferStartedAt[transferId] ?: SystemClock.elapsedRealtime()
+                        val elapsed = ((SystemClock.elapsedRealtime() - startedAt) / 1000.0).coerceAtLeast(0.001)
+                        val speed = (transferred / elapsed).toLong()
+                        val eta = if (speed > 0 && meta.totalBytes > transferred) (((meta.totalBytes - transferred).toDouble() / speed.toDouble()).toInt()).coerceAtLeast(0) else 0
+
+                        val now = SystemClock.elapsedRealtime()
+                        val lastUiAt = fileTransferLastUiUpdateAt[transferId] ?: 0L
+                        if ((now - lastUiAt) >= PROGRESS_UPDATE_INTERVAL_MS || progress >= 99) {
+                            fileTransferLastUiUpdateAt[transferId] = now
+                            _fileTransferProgress.value = FileTransferProgressEvent(
+                                deviceId = sourceDevice.ifBlank { meta.sourceDevice.ifBlank { null } },
+                                fileName = meta.fileName,
+                                direction = "receiving",
+                                progress = progress,
+                                totalBytes = meta.totalBytes,
+                                transferredBytes = transferred,
+                                speedBytesPerSec = speed,
+                                etaSeconds = eta,
+                                startedAt = startedAt,
+                            )
+                            mainActivity.notificationService.showFileTransferProgress(meta.fileName, progress, "receive", transferred, meta.totalBytes)
+                        }
+
+                        val lastAckBytes = fileTransferLastAckBytes[transferId] ?: 0L
+                        if (transferred - lastAckBytes >= ACK_INTERVAL_BYTES) {
+                            fileTransferLastAckBytes[transferId] = transferred
+                            sendMessage(JSONObject().apply {
+                                put("type", "file_transfer_ack")
+                                put("sessionId", sessionManager.getCurrentSessionId())
+                                put("deviceId", sessionManager.getDeviceId())
+                                put("payload", JSONObject().apply {
+                                    put("transferId", transferId)
+                                    put("targetDevice", meta.sourceDevice)
+                                    put("transferredBytes", transferred)
+                                    put("totalBytes", meta.totalBytes)
+                                    put("progress", progress)
+                                })
+                                put("timestamp", System.currentTimeMillis())
+                            }.toString())
+                        }
+                    }
+                }
+                "file_transfer_complete" -> {
+                    val payload = json.getJSONObject("payload")
+                    val transferId = payload.optString("transferId", "")
+                    val meta = fileTransferMeta.remove(transferId) ?: return
+                    fileTransferWriters.remove(transferId)?.close()
+                    val targetFile = fileTransferFiles.remove(transferId) ?: return
+                    val transferredBytes = fileTransferReceivedBytes.remove(transferId) ?: targetFile.length()
+                    val startedAt = transferStartedAt.remove(transferId) ?: SystemClock.elapsedRealtime()
+                    fileTransferLastUiUpdateAt.remove(transferId)
+                    fileTransferLastAckBytes.remove(transferId)
+
+                    _fileTransferProgress.value = FileTransferProgressEvent(
+                        deviceId = meta.sourceDevice.ifBlank { null },
+                        fileName = meta.fileName,
+                        direction = "receiving",
+                        progress = 100,
+                        totalBytes = meta.totalBytes,
+                        transferredBytes = transferredBytes,
+                        speedBytesPerSec = 0,
+                        etaSeconds = 0,
+                        startedAt = startedAt,
+                    )
+                    mainActivity.notificationService.showFileTransferProgress(meta.fileName, 100, "receive", transferredBytes, meta.totalBytes)
+                    mainActivity.notificationService.clearTransferProgress()
+                    _fileTransferProgress.value = null
+                    sendMessage(JSONObject().apply {
+                        put("type", "file_transfer_ack")
+                        put("sessionId", sessionManager.getCurrentSessionId())
+                        put("deviceId", sessionManager.getDeviceId())
+                        put("payload", JSONObject().apply {
+                            put("transferId", transferId)
+                            put("targetDevice", meta.sourceDevice)
+                            put("transferredBytes", transferredBytes)
+                            put("totalBytes", meta.totalBytes)
+                            put("progress", 100)
+                            put("completed", true)
+                        })
+                        put("timestamp", System.currentTimeMillis())
+                    }.toString())
+
+                    mainActivity.openReceivedTransferFile(targetFile, meta.fileName, meta.fileType, meta.sourceDevice)
+                }
+                "file_transfer_cancel" -> {
+                    val payload = json.getJSONObject("payload")
+                    val transferId = payload.optString("transferId", "")
+                    fileTransferMeta.remove(transferId)
+                    fileTransferWriters.remove(transferId)?.close()
+                    fileTransferFiles.remove(transferId)?.delete()
+                    fileTransferReceivedBytes.remove(transferId)
+                    transferStartedAt.remove(transferId)
+                    fileTransferLastUiUpdateAt.remove(transferId)
+                    fileTransferLastAckBytes.remove(transferId)
+                    _fileTransferProgress.value = null
+                    mainActivity.notificationService.clearTransferProgress()
                 }
                 "device_connected" -> {
                     val payload = json.getJSONObject("payload")
@@ -507,15 +927,14 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                         val sourceDeviceName = payload.optString("sourceDeviceName", "Browser Extension")
                         val collectionTitle = payload.optString("collectionTitle", "Tab handoff")
                         try {
-                            mainActivity.handleTabHandoffPayload(payload)
-                        } catch (e: Exception) {
-                            Log.e("FlowLink", "Failed to open tab handoff directly", e)
                             mainActivity.notificationService.showTabHandoff(
                                 collectionTitle,
                                 payload.toString(),
                                 sourceDeviceName,
                                 tabs.length()
                             )
+                        } catch (e: Exception) {
+                            Log.e("FlowLink", "Failed to show tab handoff notification", e)
                         }
                     }
                 }
@@ -643,6 +1062,25 @@ class WebSocketManager(private val mainActivity: MainActivity) {
         }
     }
 
+    data class FileTransferProgressEvent(
+        val deviceId: String?,
+        val fileName: String,
+        val direction: String,
+        val progress: Int,
+        val totalBytes: Long,
+        val transferredBytes: Long,
+        val speedBytesPerSec: Long,
+        val etaSeconds: Int,
+        val startedAt: Long,
+    )
+
+    private data class FileTransferMeta(
+        val fileName: String,
+        val fileType: String,
+        val totalBytes: Long,
+        val sourceDevice: String,
+    )
+
     sealed class ConnectionState {
         object Disconnected : ConnectionState()
         object Connecting : ConnectionState()
@@ -655,5 +1093,31 @@ class WebSocketManager(private val mainActivity: MainActivity) {
         object InProgress : SessionJoinState()
         data class Success(val sessionId: String) : SessionJoinState()
         data class Error(val message: String) : SessionJoinState()
+    }
+
+    sealed class ChatEvent {
+        data class Message(
+            val messageId: String,
+            val text: String,
+            val username: String,
+            val sourceDevice: String,
+            val targetDevice: String,
+            val sentAt: Long,
+        ) : ChatEvent()
+
+        data class Delivered(
+            val messageId: String,
+            val sourceDevice: String
+        ) : ChatEvent()
+
+        data class Seen(
+            val messageId: String,
+            val sourceDevice: String
+        ) : ChatEvent()
+
+        data class Typing(
+            val sourceDevice: String,
+            val isTyping: Boolean
+        ) : ChatEvent()
     }
 }

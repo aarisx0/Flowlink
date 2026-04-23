@@ -23,11 +23,13 @@ class NotificationService(private val context: Context) {
         const val CHANNEL_ID_NEARBY = "nearby_sessions"
         const val CHANNEL_ID_GENERAL = "general"
         const val CHANNEL_ID_MEDIA = "media_handoff"
+        const val CHANNEL_ID_TRANSFERS = "file_transfers"
         
         const val NOTIFICATION_ID_INVITATION = 1001
         const val NOTIFICATION_ID_NEARBY = 1002
         const val NOTIFICATION_ID_GENERAL = 1003
         const val NOTIFICATION_ID_MEDIA = 1004
+        const val NOTIFICATION_ID_TRANSFER = 1005
         
         const val ACTION_ACCEPT_INVITATION = "accept_invitation"
         const val ACTION_REJECT_INVITATION = "reject_invitation"
@@ -74,6 +76,13 @@ class NotificationService(private val context: Context) {
                     NotificationManager.IMPORTANCE_HIGH
                 ).apply {
                     description = "Notifications for continuing media playback from other devices"
+                },
+                NotificationChannel(
+                    CHANNEL_ID_TRANSFERS,
+                    "File Transfers",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = "Progress notifications for file uploads and downloads"
                 },
                 NotificationChannel(
                     CHANNEL_ID_GENERAL,
@@ -266,6 +275,31 @@ class NotificationService(private val context: Context) {
         notificationManager.notify(NOTIFICATION_ID_MEDIA, notification)
     }
 
+    fun showFileTransferProgress(fileName: String, progress: Int, direction: String, transferredBytes: Long = 0L, totalBytes: Long = 0L) {
+        val safeProgress = progress.coerceIn(0, 100)
+        val label = if (direction == "send") "Sending" else "Receiving"
+        val bytesText = if (totalBytes > 0) {
+            " • ${formatBytes(transferredBytes)} / ${formatBytes(totalBytes)}"
+        } else {
+            ""
+        }
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID_TRANSFERS)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("$label file")
+            .setContentText("$fileName • $safeProgress%$bytesText")
+            .setProgress(100, safeProgress, false)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(safeProgress < 100)
+            .build()
+
+        notificationManager.notify(NOTIFICATION_ID_TRANSFER, notification)
+    }
+
+    fun clearTransferProgress() {
+        notificationManager.cancel(NOTIFICATION_ID_TRANSFER)
+    }
+
     fun showTabHandoff(title: String, tabsJson: String, sourceLabel: String, tabCount: Int) {
         val openIntent = Intent(context, MainActivity::class.java).apply {
             action = ACTION_OPEN_TAB_HANDOFF
@@ -322,11 +356,13 @@ class NotificationService(private val context: Context) {
     /**
      * Show file received notification
      */
-    fun showFileReceived(filename: String, senderUsername: String) {
+    fun showFileReceived(filename: String, senderUsername: String, filePath: String? = null) {
+        val locationText = filePath?.let { "\nSaved at: $it" } ?: ""
         val notification = NotificationCompat.Builder(context, CHANNEL_ID_GENERAL)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("File Received")
             .setContentText("Received \"$filename\" from $senderUsername")
+            .setStyle(NotificationCompat.BigTextStyle().bigText("Received \"$filename\" from $senderUsername$locationText"))
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setAutoCancel(true)
             .build()
@@ -361,5 +397,18 @@ class NotificationService(private val context: Context) {
      */
     fun clearNotification(notificationId: Int) {
         notificationManager.cancel(notificationId)
+    }
+
+    private fun formatBytes(bytes: Long): String {
+        if (bytes <= 0L) return "0 B"
+        val units = arrayOf("B", "KB", "MB", "GB")
+        var value = bytes.toDouble()
+        var index = 0
+        while (value >= 1024.0 && index < units.lastIndex) {
+            value /= 1024.0
+            index += 1
+        }
+        val text = if (value >= 10 || index == 0) value.toInt().toString() else String.format("%.1f", value)
+        return "$text ${units[index]}"
     }
 }

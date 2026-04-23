@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Device, Intent } from '@shared/types';
+import { Device, FileTransferStatus, Intent } from '@shared/types';
 import MediaDetector from '../services/MediaDetector';
 import './DeviceTile.css';
 
@@ -9,14 +9,35 @@ interface DeviceTileProps {
   onDragStart: (e: React.DragEvent, item: any) => void;
   onDragEnd: () => void;
   onDrop: (intent: Intent) => void;
+  transferStatus?: FileTransferStatus | null;
 }
 
 export default function DeviceTile({
   device,
+  transferStatus,
   onDrop,
 }: DeviceTileProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [clipboardText, setClipboardText] = useState('');
+
+  const formatBytes = (value: number): string => {
+    if (value <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let size = value;
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex += 1;
+    }
+    return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+  };
+
+  const formatDuration = (seconds: number): string => {
+    const total = Math.max(0, Math.round(seconds));
+    const mins = Math.floor(total / 60);
+    const secs = total % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  };
 
   const extractFilesFromEvent = (e: React.DragEvent): File[] => {
     const files: File[] = [];
@@ -164,14 +185,11 @@ export default function DeviceTile({
     if (droppedFiles.length > 0) {
       console.log(`${droppedFiles.length} file(s) detected:`, droppedFiles.map(f => f.name));
       
-      // If single file, use existing single file handoff
+      // If single file, keep a runtime file reference and stream via chunk transfer later.
       if (droppedFiles.length === 1) {
         const file = droppedFiles[0];
         console.log('Single file detected:', file.name, file.type);
-        
-        const arrayBuffer = await file.arrayBuffer();
-        const uint8Array = new Uint8Array(arrayBuffer);
-        
+
         return {
           intent_type: 'file_handoff',
           payload: {
@@ -179,7 +197,7 @@ export default function DeviceTile({
               name: file.name,
               size: file.size,
               type: file.type,
-              data: Array.from(uint8Array), // Convert to array for JSON serialization
+              localRef: file,
             },
           },
           target_device: device.id,
@@ -194,21 +212,13 @@ export default function DeviceTile({
       const batchId = `batch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       const totalSize = droppedFiles.reduce((sum, file) => sum + file.size, 0);
       
-      // Process all files
-      const processedFiles = await Promise.all(
-        droppedFiles.map(async (file, index) => {
-          const arrayBuffer = await file.arrayBuffer();
-          const uint8Array = new Uint8Array(arrayBuffer);
-          
-          return {
-            id: `file_${index}_${Date.now()}`,
-            name: file.name,
-            size: file.size,
-            type: file.type,
-            data: Array.from(uint8Array),
-          };
-        })
-      );
+      const processedFiles = droppedFiles.map((file, index) => ({
+        id: `file_${index}_${Date.now()}`,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        localRef: file,
+      }));
       
       return {
         intent_type: 'batch_file_handoff',
@@ -404,6 +414,28 @@ export default function DeviceTile({
             )}
         </div>
       </div>
+
+      {transferStatus && (
+        <div className={`transfer-status ${transferStatus.direction}`}>
+          <div className="transfer-status-row">
+            <span className="transfer-status-label">
+              {transferStatus.direction === 'sending' ? 'Sending' : 'Receiving'} {transferStatus.fileName}
+            </span>
+            <span className="transfer-status-percent">{Math.max(0, Math.min(100, Math.round(transferStatus.progress)))}%</span>
+          </div>
+          <div className="transfer-progress-bar">
+            <div
+              className="transfer-progress-fill"
+              style={{ width: `${Math.max(0, Math.min(100, transferStatus.progress))}%` }}
+            />
+          </div>
+          <div className="transfer-meta">
+            <span>{formatBytes(transferStatus.transferredBytes)} / {formatBytes(transferStatus.totalBytes)}</span>
+            <span>{formatBytes(transferStatus.speedBytesPerSec)}/s</span>
+            <span>{transferStatus.completed ? 'Done' : `ETA ${formatDuration(transferStatus.etaSeconds)}`}</span>
+          </div>
+        </div>
+      )}
 
       <div className="device-remote-access">
         <label className="device-remote-access-toggle">

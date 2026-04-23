@@ -1,6 +1,6 @@
 .device-tile {
-  background: linear-gradient(135deg, #f0f4ff 0%, #e8eeff 100%);
-  border: 3px solid #667eea;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.92) 0%, rgba(238, 242, 255, 0.9) 100%);
+  border: 1px solid rgba(99, 102, 241, 0.32);
   border-radius: 16px;
   padding: 1.5rem;
   transition: all 0.2s;
@@ -12,12 +12,12 @@
   z-index: 10;
   pointer-events: auto !important;
   user-select: none;
-  box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
+  box-shadow: 0 10px 30px rgba(30, 41, 59, 0.12);
 }
 
 .device-tile:hover {
-  border-color: #5563d6;
-  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+  border-color: rgba(79, 70, 229, 0.55);
+  box-shadow: 0 18px 35px rgba(30, 41, 59, 0.18);
   transform: translateY(-2px);
 }
 
@@ -81,6 +81,72 @@
   margin-top: auto;
   padding-top: 1rem;
   border-top: 2px solid #667eea;
+}
+
+.transfer-status {
+  margin-top: 1rem;
+  padding: 0.85rem 0.9rem;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(102, 126, 234, 0.25);
+}
+
+.transfer-status.sending {
+  border-color: rgba(76, 175, 80, 0.35);
+}
+
+.transfer-status.receiving {
+  border-color: rgba(33, 150, 243, 0.35);
+}
+
+.transfer-status-row,
+.transfer-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.transfer-status-row {
+  align-items: center;
+  margin-bottom: 0.55rem;
+}
+
+.transfer-status-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.transfer-status-percent {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #667eea;
+}
+
+.transfer-progress-bar {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(102, 126, 234, 0.14);
+  overflow: hidden;
+}
+
+.transfer-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #667eea, #4caf50);
+  transition: width 0.2s ease;
+}
+
+.transfer-status.receiving .transfer-progress-fill {
+  background: linear-gradient(90deg, #2196f3, #667eea);
+}
+
+.transfer-meta {
+  margin-top: 0.45rem;
+  font-size: 0.72rem;
+  color: #444;
+  flex-wrap: wrap;
 }
 
 .permission-label {

@@ -17,7 +17,8 @@ export type IntentType =
   | 'batch_file_handoff'
   | 'session_invitation'
   | 'invitation_response'
-  | 'nearby_session_notification';
+  | 'nearby_session_notification'
+  | 'chat_message';
 
 export type PermissionType = 
   | 'files'
@@ -25,6 +26,20 @@ export type PermissionType =
   | 'prompts'
   | 'clipboard'
   | 'remote_browse';
+
+export type TransferDirection = 'sending' | 'receiving';
+
+export interface FileTransferStatus {
+  fileName: string;
+  direction: TransferDirection;
+  progress: number;
+  totalBytes: number;
+  transferredBytes: number;
+  speedBytesPerSec: number;
+  etaSeconds: number;
+  startedAt: number;
+  completed?: boolean;
+}
 
 export interface Device {
   id: string;
@@ -81,6 +96,7 @@ export interface IntentPayload {
     type: string;
     data?: ArrayBuffer | Blob | number[];
     path?: string; // For remote file access
+    localRef?: unknown; // Runtime-only handle for local file objects on sender
   };
   
   // Batch file handoff (multiple files)
@@ -95,6 +111,7 @@ export interface IntentPayload {
       type: string;
       data?: ArrayBuffer | Blob | number[];
       path?: string;
+      localRef?: unknown; // Runtime-only handle for local file objects on sender
     }>;
   };
   
@@ -180,6 +197,15 @@ export interface IntentPayload {
     creatorDeviceName: string;
     deviceCount: number;
   };
+
+  // Chat messages
+  chat?: {
+    messageId: string;
+    text: string;
+    username: string;
+    sentAt: number;
+    format?: 'plain' | 'markdown';
+  };
 }
 
 export interface WebSocketMessage {
@@ -225,6 +251,10 @@ export type MessageType =
   | 'tab_handoff'
   | 'tab_handoff_offer'
   | 'notification'
+  | 'chat_message'
+  | 'chat_delivered'
+  | 'chat_seen'
+  | 'chat_typing'
   | 'error';
 
 export interface WebRTCSignal {

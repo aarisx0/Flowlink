@@ -10,6 +10,7 @@ let userName, smartHandoffToggle, clipboardToggle, notificationsToggle;
 let activityList, openWebAppBtn, logoutBtn;
 let receiverUsernameInput, saveReceiverBtn, receiverStatus, receiverList;
 let sendActiveTabBtn, sendTabCollectionBtn;
+let sendFileBtn, sendFileInput, sendFileStatus;
 
 // State
 let isConnected = false;
@@ -50,6 +51,9 @@ document.addEventListener('DOMContentLoaded', () => {
   receiverList = document.getElementById('receiverList');
   sendActiveTabBtn = document.getElementById('sendActiveTabBtn');
   sendTabCollectionBtn = document.getElementById('sendTabCollectionBtn');
+  sendFileBtn = document.getElementById('sendFileBtn');
+  sendFileInput = document.getElementById('sendFileInput');
+  sendFileStatus = document.getElementById('sendFileStatus');
   
   // Load saved data
   loadUserData();
@@ -75,6 +79,8 @@ document.addEventListener('DOMContentLoaded', () => {
   logoutBtn.addEventListener('click', handleLogout);
   sendActiveTabBtn.addEventListener('click', () => handleTabSend('send_active_tab_handoff'));
   sendTabCollectionBtn.addEventListener('click', () => handleTabSend('send_tab_collection_handoff'));
+  sendFileBtn.addEventListener('click', () => sendFileInput.click());
+  sendFileInput.addEventListener('change', handleFileSend);
   
   // Listen for connection status updates
   chrome.runtime.onMessage.addListener((message) => {
@@ -86,6 +92,11 @@ document.addEventListener('DOMContentLoaded', () => {
         targetStatuses[payload.targetUsername] = payload;
       }
       updateReceiverUI();
+    } else if (message.type === 'extension_file_transfer_progress') {
+      const data = message.data || {};
+      if (sendFileStatus) {
+        sendFileStatus.textContent = `${data.fileName || 'File'}: ${data.progress || 0}%`;
+      }
     }
   });
   
@@ -136,6 +147,72 @@ function loadUserData() {
       clipboardToggle.checked = result.settings.universalClipboard !== false;
       notificationsToggle.checked = result.settings.notifications !== false;
     }
+  });
+}
+
+function handleFileSend() {
+  const file = sendFileInput.files?.[0];
+  if (!file) return;
+  if (!currentReceiverUsernames.length) {
+    alert('Add at least one receiver username first.');
+    return;
+  }
+
+  const transferId = `popup-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const chunkSize = 128 * 1024;
+  let offset = 0;
+  let chunkIndex = 0;
+
+  sendFileStatus.textContent = `Starting ${file.name}... 0%`;
+  chrome.runtime.sendMessage({
+    type: 'extension_file_transfer_start',
+    transferId,
+    fileName: file.name,
+    fileType: file.type || 'application/octet-stream',
+    totalBytes: file.size
+  }, async (startResponse) => {
+    if (chrome.runtime.lastError || !startResponse?.success) {
+      sendFileStatus.textContent = `Failed to start ${file.name}`;
+      return;
+    }
+    while (offset < file.size) {
+      const next = Math.min(file.size, offset + chunkSize);
+      const chunkBuffer = await file.slice(offset, next).arrayBuffer();
+      const chunkBytes = new Uint8Array(chunkBuffer);
+      let binary = '';
+      for (let i = 0; i < chunkBytes.length; i += 1) binary += String.fromCharCode(chunkBytes[i]);
+      const base64 = btoa(binary);
+      const response = await new Promise((resolve) => {
+        chrome.runtime.sendMessage({
+          type: 'extension_file_transfer_chunk',
+          transferId,
+          chunkIndex,
+          data: base64,
+          fileName: file.name,
+          fileType: file.type || 'application/octet-stream',
+          totalBytes: file.size
+        }, resolve);
+      });
+      if (chrome.runtime.lastError || !response?.success) {
+        sendFileStatus.textContent = `Failed at ${Math.round((offset / file.size) * 100)}%`;
+        return;
+      }
+      offset = next;
+      chunkIndex += 1;
+      sendFileStatus.textContent = `${file.name}: ${Math.round((offset / file.size) * 100)}%`;
+    }
+    chrome.runtime.sendMessage({
+      type: 'extension_file_transfer_complete',
+      transferId,
+      fileName: file.name
+    }, (endResponse) => {
+      if (chrome.runtime.lastError || !endResponse?.success) {
+        sendFileStatus.textContent = `Failed to finish ${file.name}`;
+        return;
+      }
+      sendFileStatus.textContent = `Sent ${file.name} (100%)`;
+      addActivity('tab', `File sent: ${file.name}`);
+    });
   });
 }
 

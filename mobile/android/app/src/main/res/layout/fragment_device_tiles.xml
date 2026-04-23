@@ -21,6 +21,71 @@
         android:layout_weight="1" />
 
     <LinearLayout
+        android:id="@+id/chat_panel"
+        android:layout_width="match_parent"
+        android:layout_height="220dp"
+        android:layout_marginTop="12dp"
+        android:orientation="vertical"
+        android:background="#F5F7FF"
+        android:padding="10dp"
+        android:translationY="18dp"
+        android:alpha="0"
+        android:visibility="gone">
+
+        <ScrollView
+            android:id="@+id/chat_scroll"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <TextView
+                android:id="@+id/tv_chat_messages"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="13sp"
+                android:textColor="#1A1A1A"
+                android:text="" />
+        </ScrollView>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="8dp">
+
+            <EditText
+                android:id="@+id/et_chat_input"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="Message / link / code..."
+                android:textColor="#111827"
+                android:textColorHint="#6B7280"
+                android:background="#FFFFFFFF"
+                android:minHeight="44dp"
+                android:gravity="top|start"
+                android:inputType="textMultiLine"
+                android:maxLines="4" />
+
+            <Button
+                android:id="@+id/btn_send_chat"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Send"
+                android:layout_marginStart="8dp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tv_chat_typing"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text=""
+            android:textColor="#334155"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
@@ -34,6 +99,13 @@
             android:text="Invite Others"
             android:background="@drawable/button_primary"
             android:textColor="@color/white"
+            android:layout_marginEnd="8dp" />
+
+        <Button
+            android:id="@+id/btn_chat"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Chat"
             android:layout_marginEnd="8dp" />
 
         <Button

@@ -37,6 +37,7 @@ import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
@@ -674,7 +675,9 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
                 val payload = intent.payload ?: return
                 val fileJson = payload["file"] ?: return
                 try {
-                    openReceivedFile(JSONObject(fileJson), null)
+                    val fileObj = JSONObject(fileJson)
+                    if (!fileObj.has("data") && !fileObj.has("dataBase64")) return
+                    openReceivedFile(fileObj, null)
                 } catch (e: Exception) {
                     Toast.makeText(this, "Failed to handle received file", Toast.LENGTH_SHORT).show()
                 }
@@ -735,10 +738,17 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
             }
         }
         
-        val dataArray = fileObj.getJSONArray("data")
-        val bytes = ByteArray(dataArray.length())
-        for (i in 0 until dataArray.length()) {
-            bytes[i] = dataArray.getInt(i).toByte()
+        val bytes = when {
+            fileObj.has("data") && fileObj.opt("data") is JSONArray -> {
+                val dataArray = fileObj.getJSONArray("data")
+                ByteArray(dataArray.length()).also { out ->
+                    for (i in 0 until dataArray.length()) out[i] = dataArray.getInt(i).toByte()
+                }
+            }
+            fileObj.has("dataBase64") -> {
+                android.util.Base64.decode(fileObj.getString("dataBase64"), android.util.Base64.DEFAULT)
+            }
+            else -> return
         }
 
         // Write to cache directory
@@ -782,6 +792,32 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
         } catch (e: Exception) {
             android.util.Log.e("FlowLink", "Failed to open file", e)
             Toast.makeText(this, "Failed to open file: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    fun openReceivedTransferFile(file: File, fileName: String, fileType: String, sourceDevice: String) {
+        try {
+            val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+            val flowlinkDir = File(downloadsDir, "FlowLink")
+            if (!flowlinkDir.exists()) {
+                flowlinkDir.mkdirs()
+            }
+            val persistedFile = File(flowlinkDir, fileName)
+            file.copyTo(persistedFile, overwrite = true)
+            val inferredType = if (fileType.isBlank()) "*/*" else fileType
+            val uri = FileProvider.getUriForFile(this, "${BuildConfig.APPLICATION_ID}.fileprovider", persistedFile)
+            val openIntent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, inferredType)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            val chooser = Intent.createChooser(openIntent, "Open $fileName with")
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(chooser)
+            notificationService.showFileReceived(fileName, sourceDevice.ifBlank { "Device" }, persistedFile.absolutePath)
+        } catch (e: Exception) {
+            android.util.Log.e("FlowLink", "Failed to open received transfer file", e)
+            Toast.makeText(this, "Received $fileName in Downloads/FlowLink", Toast.LENGTH_LONG).show()
         }
     }
 
