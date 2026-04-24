@@ -40,11 +40,13 @@ class DeviceTilesFragment : Fragment() {
     private val chatMessages = mutableListOf<ChatMessage>()
     private var deviceAdapter: DeviceTileAdapter? = null
     private var pendingFileTargetDeviceId: String? = null
-    private var isChatOpen = false
+    private var isChatOpen = true
+    private var isStudyOpen = true
     private val transferClearRunnables = mutableMapOf<String, Runnable>()
     private val typingByDevice = mutableMapOf<String, Boolean>()
     private var chatTypingStopRunnable: Runnable? = null
     private var typingIndicatorRunnable: Runnable? = null
+    private var studyPage = 1
 
     // Launcher to let the user pick a file/media to send when there is no
     // useful clipboard content available.
@@ -113,6 +115,14 @@ class DeviceTilesFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
+        // Match the new screen design: chat and study cards are shown by default.
+        binding.chatPanel.visibility = View.VISIBLE
+        binding.chatPanel.alpha = 1f
+        binding.chatPanel.translationY = 0f
+        binding.studyPanel.visibility = View.VISIBLE
+        binding.studyPanel.alpha = 1f
+        binding.studyPanel.translationY = 0f
+
         binding.btnLeaveSession.setOnClickListener {
             (activity as? MainActivity)?.leaveSession()
         }
@@ -131,6 +141,20 @@ class DeviceTilesFragment : Fragment() {
         binding.btnSendChat.setOnClickListener {
             sendChatMessage()
         }
+        binding.btnStudyFab.setOnClickListener {
+            isStudyOpen = !isStudyOpen
+            toggleStudyPanel(isStudyOpen)
+        }
+        binding.btnStudyPrev.setOnClickListener {
+            studyPage = maxOf(1, studyPage - 1)
+            updateStudyStatus()
+            (activity as? MainActivity)?.webSocketManager?.sendStudySync("page", studyPage)
+        }
+        binding.btnStudyNext.setOnClickListener {
+            studyPage += 1
+            updateStudyStatus()
+            (activity as? MainActivity)?.webSocketManager?.sendStudySync("page", studyPage)
+        }
         binding.etChatInput.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
@@ -142,7 +166,7 @@ class DeviceTilesFragment : Fragment() {
         // Setup RecyclerView
         binding.rvDevices.layoutManager = LinearLayoutManager(requireContext())
         deviceAdapter = DeviceTileAdapter(
-            devices = emptyList(),
+            devices = mutableListOf(),
             onDeviceClick = { device -> handleDeviceTileClick(device) },
             onBrowseFilesClick = { device -> handleBrowseFilesClick(device) },
             transferStatuses = transferStatuses
@@ -201,7 +225,7 @@ class DeviceTilesFragment : Fragment() {
                         completed = progress.progress >= 100
                     )
                     updateDeviceList()
-                    if ((progress.progress >= 100 || progress.transferredBytes >= progress.totalBytes) && progress.direction == "receiving") {
+                    if (progress.progress >= 100 || progress.transferredBytes >= progress.totalBytes) {
                         val clearRunnable = Runnable {
                             transferStatuses.remove(targetId)
                             updateDeviceList()
@@ -260,6 +284,30 @@ class DeviceTilesFragment : Fragment() {
                     }
                 }
             }
+            viewLifecycleOwner.lifecycleScope.launch {
+                mainActivity.webSocketManager.studyStore.collect { files ->
+                    binding.tvStudyStore.text = if (files.isEmpty()) {
+                        "No docs in store yet."
+                    } else {
+                        files.joinToString("\n\n") { file ->
+                            "• ${file.name} (${maxOf(1, file.size / 1024)} KB)"
+                        }
+                    }
+                }
+            }
+            viewLifecycleOwner.lifecycleScope.launch {
+                mainActivity.webSocketManager.studySyncEvents.collect { event ->
+                    if (event.mode == "page") {
+                        val page = when (val value = event.value) {
+                            is Number -> value.toInt()
+                            is String -> value.toIntOrNull() ?: studyPage
+                            else -> studyPage
+                        }
+                        studyPage = maxOf(1, page)
+                        updateStudyStatus()
+                    }
+                }
+            }
             
             // Ensure WebSocket is connected to receive device updates
             val connectionState = mainActivity.webSocketManager.connectionState.value
@@ -272,27 +320,36 @@ class DeviceTilesFragment : Fragment() {
                 } else {
                     android.util.Log.d("FlowLink", "WebSocket already connected, waiting for devices")
                 }
+                mainActivity.webSocketManager.requestStudyStore()
             }
         }
     }
 
+    private fun updateStudyStatus() {
+        binding.tvStudyStatus.text = "Study Room - Page $studyPage"
+    }
+
     private fun updateStatus(code: String?) {
         val statusText = if (connectedDevices.isEmpty()) {
-            "Connected to session: $code\n\nWaiting for other devices..."
+            "Session Code: $code | Waiting for other devices"
         } else {
-            "Connected to session: $code\n\n${connectedDevices.size} device(s) connected"
+            "Session Code: $code | ${connectedDevices.size} device(s) connected"
         }
         binding.tvStatus.text = statusText
     }
 
     private fun updateDeviceList() {
-        deviceAdapter = DeviceTileAdapter(
-            devices = connectedDevices.values.toList(),
-            onDeviceClick = { device -> handleDeviceTileClick(device) },
-            onBrowseFilesClick = { device -> handleBrowseFilesClick(device) },
-            transferStatuses = transferStatuses
-        )
-        binding.rvDevices.adapter = deviceAdapter
+        if (deviceAdapter == null) {
+            deviceAdapter = DeviceTileAdapter(
+                devices = connectedDevices.values.toMutableList(),
+                onDeviceClick = { device -> handleDeviceTileClick(device) },
+                onBrowseFilesClick = { device -> handleBrowseFilesClick(device) },
+                transferStatuses = transferStatuses
+            )
+            binding.rvDevices.adapter = deviceAdapter
+        } else {
+            deviceAdapter?.updateData(connectedDevices.values.toList(), transferStatuses)
+        }
     }
 
     /**
@@ -616,6 +673,26 @@ class DeviceTilesFragment : Fragment() {
         }
     }
 
+    private fun toggleStudyPanel(open: Boolean) {
+        if (open) {
+            binding.studyPanel.visibility = View.VISIBLE
+            binding.studyPanel.translationY = 18f
+            binding.studyPanel.alpha = 0f
+            binding.studyPanel.animate()
+                .translationY(0f)
+                .alpha(1f)
+                .setDuration(220)
+                .start()
+        } else {
+            binding.studyPanel.animate()
+                .translationY(18f)
+                .alpha(0f)
+                .setDuration(180)
+                .withEndAction { binding.studyPanel.visibility = View.GONE }
+                .start()
+        }
+    }
+
     private fun renderChat() {
         val selfId = sessionManager?.getDeviceId().orEmpty()
         val formatter = SimpleDateFormat("HH:mm", Locale.getDefault())
@@ -649,4 +726,3 @@ class DeviceTilesFragment : Fragment() {
         deviceAdapter = null
     }
 }
-

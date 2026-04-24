@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/bg_gradient">
+
+    <!-- Header -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="18dp"
+        android:paddingTop="20dp"
+        android:paddingBottom="14dp">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Room Chat"
+                android:textColor="#FFFFFF"
+                android:textSize="22sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tv_chat_subtitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Session active"
+                android:textColor="#B8B5D4"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/btn_pop_out"
+            android:layout_width="wrap_content"
+            android:layout_height="34dp"
+            android:text="Pop Out"
+            android:textSize="12sp"
+            android:textColor="#6C63FF"
+            android:textAllCaps="false"
+            android:background="@drawable/glass_card_bg_dark"
+            android:paddingHorizontal="14dp" />
+    </LinearLayout>
+
+    <!-- Messages List -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rv_chat_messages"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:paddingHorizontal="14dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        android:clipToPadding="false" />
+
+    <!-- Typing Indicator -->
+    <TextView
+        android:id="@+id/tv_chat_typing"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="18dp"
+        android:paddingBottom="4dp"
+        android:textColor="#A78BFA"
+        android:textSize="12sp"
+        android:visibility="gone" />
+
+    <!-- Input Bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@drawable/glass_card_bg_dark"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="10dp">
+
+        <ImageButton
+            android:id="@+id/btn_attach"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="@android:color/transparent"
+            android:src="@android:drawable/ic_menu_add"
+            android:tint="#A78BFA"
+            android:contentDescription="Attach"
+            android:layout_marginEnd="8dp" />
+
+        <EditText
+            android:id="@+id/et_chat_input"
+            android:layout_width="0dp"
+            android:layout_height="42dp"
+            android:layout_weight="1"
+            android:background="@drawable/input_glass_bg"
+            android:hint="Type a message…"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#6B6890"
+            android:textSize="14sp"
+            android:paddingHorizontal="14dp"
+            android:inputType="textMultiLine"
+            android:maxLines="4"
+            android:gravity="center_vertical" />
+
+        <Button
+            android:id="@+id/btn_send_chat"
+            android:layout_width="wrap_content"
+            android:layout_height="42dp"
+            android:text="Send"
+            android:textColor="#FFFFFF"
+            android:textAllCaps="false"
+            android:textSize="14sp"
+            android:background="@drawable/btn_primary_bg"
+            android:paddingHorizontal="18dp"
+            android:layout_marginStart="8dp" />
+    </LinearLayout>
+
+</LinearLayout>

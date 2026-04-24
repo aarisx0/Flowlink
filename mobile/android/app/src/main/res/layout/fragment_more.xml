@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_gradient"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingHorizontal="18dp"
+        android:paddingTop="20dp"
+        android:paddingBottom="24dp">
+
+        <!-- Header -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="24dp">
+
+            <ImageButton
+                android:id="@+id/btn_back"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="@drawable/glass_card_bg_dark"
+                android:src="@android:drawable/ic_menu_revert"
+                android:tint="#FFFFFF"
+                android:padding="8dp"
+                android:contentDescription="Back"
+                android:layout_marginEnd="14dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="More"
+                android:textColor="#FFFFFF"
+                android:textSize="22sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- Groups Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/glass_card_bg"
+            android:padding="20dp"
+            android:layout_marginBottom="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="14dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Device Groups"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/btn_create_group"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:text="+ Create"
+                    android:textSize="12sp"
+                    android:textColor="#FFFFFF"
+                    android:textAllCaps="false"
+                    android:background="@drawable/btn_primary_bg"
+                    android:paddingHorizontal="14dp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tv_groups_empty"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="No groups yet.\nCreate one to broadcast to multiple devices!"
+                android:textColor="#6B6890"
+                android:textSize="13sp"
+                android:gravity="center"
+                android:paddingVertical="16dp" />
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rv_groups"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:nestedScrollingEnabled="false"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <!-- Menu Items -->
+        <TextView
+            android:id="@+id/more_session_details"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:text="📋   Session Details"
+            android:textColor="#FFFFFF"
+            android:textSize="15sp"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="18dp"
+            android:background="@drawable/glass_card_bg_dark"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:id="@+id/more_permissions"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:text="🔒   Permissions"
+            android:textColor="#FFFFFF"
+            android:textSize="15sp"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="18dp"
+            android:background="@drawable/glass_card_bg_dark"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:id="@+id/more_settings"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:text="⚙️   Settings"
+            android:textColor="#FFFFFF"
+            android:textSize="15sp"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="18dp"
+            android:background="@drawable/glass_card_bg_dark"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:id="@+id/more_help"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:text="❓   Help &amp; Support"
+            android:textColor="#FFFFFF"
+            android:textSize="15sp"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="18dp"
+            android:background="@drawable/glass_card_bg_dark"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:id="@+id/more_about"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:text="ℹ️   About FlowLink"
+            android:textColor="#FFFFFF"
+            android:textSize="15sp"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="18dp"
+            android:background="@drawable/glass_card_bg_dark"
+            android:layout_marginBottom="20dp" />
+
+        <TextView
+            android:id="@+id/more_leave_session"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:text="🚪   Leave Session"
+            android:textColor="#EF4444"
+            android:textSize="15sp"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="18dp"
+            android:background="@drawable/btn_danger_bg" />
+
+    </LinearLayout>
+</ScrollView>

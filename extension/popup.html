@@ -70,6 +70,16 @@
           <button id="sendFileBtn" class="btn btn-secondary">Send File</button>
         </div>
         <div class="receiver-status" id="sendFileStatus">No file transfer running</div>
+        <div class="transfer-progress-card" id="transferProgressCard" hidden>
+          <div class="transfer-progress-head">
+            <strong id="transferFileName">Waiting...</strong>
+            <span id="transferPercent">0%</span>
+          </div>
+          <div class="transfer-progress-bar">
+            <div class="transfer-progress-fill" id="transferProgressFill"></div>
+          </div>
+          <div class="transfer-progress-meta" id="transferProgressMeta">0 KB / 0 KB</div>
+        </div>
         
         <div class="feature-item">
           <div class="feature-info">

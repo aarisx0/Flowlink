@@ -1,71 +1,182 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="24dp"
-    android:gravity="center">
+    android:background="@drawable/bg_gradient"
+    android:fillViewport="true">
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="FlowLink"
-        android:textSize="32sp"
-        android:textStyle="bold"
-        android:layout_marginBottom="8dp" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Cross-Device Continuity"
-        android:textSize="16sp"
-        android:layout_marginBottom="48dp" />
-
-    <Button
-        android:id="@+id/btn_create_session"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Create Session"
-        android:layout_marginBottom="16dp" />
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:paddingHorizontal="28dp"
+        android:paddingTop="72dp"
+        android:paddingBottom="48dp">
 
-    <Button
-        android:id="@+id/btn_join_session"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Scan QR Code"
-        android:layout_marginBottom="16dp" />
+        <!-- Logo / Brand -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:layout_marginBottom="48dp">
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="OR"
-        android:layout_marginVertical="16dp" />
+            <!-- Glow ring around icon -->
+            <FrameLayout
+                android:layout_width="96dp"
+                android:layout_height="96dp"
+                android:layout_gravity="center"
+                android:layout_marginBottom="20dp">
 
-    <EditText
-        android:id="@+id/et_session_code"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:hint="Enter 6-digit code"
-        android:inputType="number"
-        android:maxLength="6"
-        android:textSize="24sp"
-        android:gravity="center"
-        android:layout_marginBottom="16dp" />
+                <View
+                    android:layout_width="96dp"
+                    android:layout_height="96dp"
+                    android:background="@drawable/share_fab_bg"
+                    android:alpha="0.25" />
 
-    <Button
-        android:id="@+id/btn_enter_code"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Join Session" />
+                <ImageView
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:layout_gravity="center"
+                    android:src="@android:drawable/ic_menu_share"
+                    android:tint="#FFFFFF" />
+            </FrameLayout>
 
-    <Button
-        android:id="@+id/btn_clear_session"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Clear Saved Session"
-        android:layout_marginTop="32dp"
-        android:backgroundTint="#FF6B6B"
-        android:textColor="#FFFFFF" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="FlowLink"
+                android:textSize="36sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF"
+                android:letterSpacing="0.02" />
 
-</LinearLayout>
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Cross-Device Continuity"
+                android:textSize="14sp"
+                android:textColor="#B8B5D4"
+                android:layout_marginTop="6dp" />
+        </LinearLayout>
+
+        <!-- Glass Card: Actions -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/glass_card_bg"
+            android:padding="24dp"
+            android:layout_marginBottom="20dp">
+
+            <Button
+                android:id="@+id/btn_create_session"
+                android:layout_width="match_parent"
+                android:layout_height="54dp"
+                android:text="Create Session"
+                android:textSize="16sp"
+                android:textColor="#FFFFFF"
+                android:textAllCaps="false"
+                android:background="@drawable/btn_primary_bg"
+                android:layout_marginBottom="14dp" />
+
+            <Button
+                android:id="@+id/btn_join_session"
+                android:layout_width="match_parent"
+                android:layout_height="54dp"
+                android:text="Scan QR Code"
+                android:textSize="16sp"
+                android:textColor="#FFFFFF"
+                android:textAllCaps="false"
+                android:background="@drawable/btn_ghost_bg" />
+        </LinearLayout>
+
+        <!-- Divider -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="20dp">
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1"
+                android:background="#33FFFFFF" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="  OR  "
+                android:textColor="#6B6890"
+                android:textSize="13sp" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1"
+                android:background="#33FFFFFF" />
+        </LinearLayout>
+
+        <!-- Glass Card: Enter Code -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/glass_card_bg"
+            android:padding="24dp"
+            android:layout_marginBottom="20dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Enter 6-digit code"
+                android:textColor="#B8B5D4"
+                android:textSize="13sp"
+                android:layout_marginBottom="10dp" />
+
+            <EditText
+                android:id="@+id/et_session_code"
+                android:layout_width="match_parent"
+                android:layout_height="54dp"
+                android:hint="572398"
+                android:inputType="number"
+                android:maxLength="6"
+                android:textSize="28sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:textColor="#FFFFFF"
+                android:textColorHint="#40FFFFFF"
+                android:background="@drawable/input_glass_bg"
+                android:paddingHorizontal="16dp"
+                android:letterSpacing="0.3"
+                android:layout_marginBottom="14dp" />
+
+            <Button
+                android:id="@+id/btn_enter_code"
+                android:layout_width="match_parent"
+                android:layout_height="54dp"
+                android:text="Join Session"
+                android:textSize="16sp"
+                android:textColor="#FFFFFF"
+                android:textAllCaps="false"
+                android:background="@drawable/btn_primary_bg" />
+        </LinearLayout>
+
+        <!-- Clear Session -->
+        <Button
+            android:id="@+id/btn_clear_session"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="Clear Saved Session"
+            android:textSize="14sp"
+            android:textColor="#EF4444"
+            android:textAllCaps="false"
+            android:background="@drawable/btn_danger_bg" />
+
+    </LinearLayout>
+</ScrollView>
 

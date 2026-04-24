@@ -12,7 +12,7 @@ interface DeviceTileProps {
   transferStatus?: FileTransferStatus | null;
 }
 
-export default function DeviceTile({
+function DeviceTileComponent({
   device,
   transferStatus,
   onDrop,
@@ -546,4 +546,27 @@ export default function DeviceTile({
     </div>
   );
 }
+
+export default React.memo(DeviceTileComponent, (prev, next) => {
+  const prevTransfer = prev.transferStatus;
+  const nextTransfer = next.transferStatus;
+  const transferEqual =
+    (!prevTransfer && !nextTransfer) ||
+    (Boolean(prevTransfer) &&
+      Boolean(nextTransfer) &&
+      prevTransfer!.progress === nextTransfer!.progress &&
+      prevTransfer!.transferredBytes === nextTransfer!.transferredBytes &&
+      prevTransfer!.completed === nextTransfer!.completed &&
+      prevTransfer!.fileName === nextTransfer!.fileName &&
+      prevTransfer!.direction === nextTransfer!.direction);
+
+  return (
+    prev.device.id === next.device.id &&
+    prev.device.online === next.device.online &&
+    prev.device.name === next.device.name &&
+    prev.device.username === next.device.username &&
+    JSON.stringify(prev.device.permissions) === JSON.stringify(next.device.permissions) &&
+    transferEqual
+  );
+});
 

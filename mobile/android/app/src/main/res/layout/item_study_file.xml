@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:background="@drawable/glass_card_bg_dark"
+    android:padding="14dp"
+    android:layout_marginBottom="8dp">
+
+    <!-- File Icon -->
+    <TextView
+        android:id="@+id/tv_file_icon"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:gravity="center"
+        android:text="📄"
+        android:textSize="20sp"
+        android:background="@drawable/glass_card_bg"
+        android:layout_marginEnd="12dp" />
+
+    <!-- File Info -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/tv_file_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="filename.pdf"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:ellipsize="end"
+            android:maxLines="1" />
+
+        <TextView
+            android:id="@+id/tv_file_size"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="0 KB"
+            android:textColor="#B8B5D4"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <!-- Actions -->
+    <ImageButton
+        android:id="@+id/btn_open_file"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:background="@drawable/glass_card_bg_dark"
+        android:src="@android:drawable/ic_menu_view"
+        android:tint="#A78BFA"
+        android:padding="6dp"
+        android:contentDescription="Open"
+        android:layout_marginEnd="6dp" />
+
+    <ImageButton
+        android:id="@+id/btn_delete_file"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:background="@drawable/btn_danger_bg"
+        android:src="@android:drawable/ic_menu_delete"
+        android:tint="#EF4444"
+        android:padding="6dp"
+        android:contentDescription="Delete" />
+
+</LinearLayout>

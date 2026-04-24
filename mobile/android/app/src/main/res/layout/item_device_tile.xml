@@ -1,35 +1,50 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_margin="8dp"
-    app:cardCornerRadius="8dp"
-    app:cardElevation="4dp">
+    android:orientation="vertical"
+    android:background="@drawable/glass_card_bg"
+    android:padding="16dp"
+    android:layout_marginBottom="10dp">
 
+    <!-- Top Row: Name + Status -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="16dp">
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="6dp">
 
-        <TextView
-            android:id="@+id/device_name"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Device Name"
-            android:textSize="18sp"
-            android:textStyle="bold"
-            android:textColor="@android:color/black" />
+        <View
+            android:id="@+id/online_dot"
+            android:layout_width="10dp"
+            android:layout_height="10dp"
+            android:background="@drawable/online_dot"
+            android:layout_marginEnd="10dp" />
 
-        <TextView
-            android:id="@+id/device_type"
-            android:layout_width="match_parent"
+        <LinearLayout
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="Device Type"
-            android:textSize="14sp"
-            android:textColor="@android:color/darker_gray"
-            android:layout_marginTop="4dp" />
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/device_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Device Name"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF" />
+
+            <TextView
+                android:id="@+id/device_type"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Device Type"
+                android:textSize="12sp"
+                android:textColor="#B8B5D4" />
+        </LinearLayout>
 
         <TextView
             android:id="@+id/device_status"
@@ -37,107 +52,105 @@
             android:layout_height="wrap_content"
             android:text="Online"
             android:textSize="12sp"
-            android:layout_marginTop="8dp" />
+            android:textColor="#22C55E"
+            android:textStyle="bold" />
+    </LinearLayout>
 
-        <TextView
-            android:id="@+id/device_permissions"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Permissions"
-            android:textSize="12sp"
-            android:textColor="@android:color/darker_gray"
-            android:layout_marginTop="4dp" />
+    <!-- Permissions -->
+    <TextView
+        android:id="@+id/device_permissions"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="No permissions"
+        android:textSize="11sp"
+        android:textColor="#6B6890"
+        android:layout_marginBottom="10dp" />
 
-        <LinearLayout
-            android:id="@+id/transfer_status_container"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:layout_marginTop="12dp"
-            android:padding="12dp"
-            android:background="#F4F6FF"
-            android:visibility="gone">
+    <!-- Transfer Progress -->
+    <LinearLayout
+        android:id="@+id/transfer_status_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/glass_card_bg_dark"
+        android:padding="10dp"
+        android:layout_marginBottom="10dp"
+        android:visibility="gone">
 
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical">
-
-                <TextView
-                    android:id="@+id/tv_transfer_status"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="Sending file"
-                    android:textStyle="bold"
-                    android:textSize="12sp"
-                    android:textColor="#1A1A1A" />
-
-                <TextView
-                    android:id="@+id/tv_transfer_percent"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="0%"
-                    android:textSize="12sp"
-                    android:textColor="#667EEA"
-                    android:textStyle="bold" />
-            </LinearLayout>
-
-            <ProgressBar
-                android:id="@+id/transfer_progress_bar"
-                style="@android:style/Widget.ProgressBar.Horizontal"
-                android:layout_width="match_parent"
-                android:layout_height="8dp"
-                android:layout_marginTop="8dp"
-                android:max="100"
-                android:progress="0" />
-
-            <TextView
-                android:id="@+id/tv_transfer_meta"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:text="0 B / 0 B · ETA 00:00"
-                android:textSize="10sp"
-                android:textColor="#666666" />
-
-        </LinearLayout>
-
-        <!-- Action buttons section -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:layout_marginTop="12dp"
-            android:gravity="end">
-
-            <Button
-                android:id="@+id/btn_browse_files"
-                android:layout_width="wrap_content"
-                android:layout_height="36dp"
-                android:text="📁 Browse Files"
-                android:textSize="12sp"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
-                android:background="@drawable/button_browse_files"
-                android:textColor="@android:color/white"
-                android:layout_marginEnd="8dp"
-                style="?android:attr/buttonStyleSmall" />
+            android:gravity="center_vertical"
+            android:layout_marginBottom="6dp">
 
             <TextView
-                android:id="@+id/tv_tap_hint"
+                android:id="@+id/tv_transfer_status"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Tap tile to send clipboard"
-                android:textSize="10sp"
-                android:textColor="@android:color/darker_gray"
-                android:gravity="center_vertical"
-                android:layout_marginEnd="8dp" />
+                android:text="Sending file"
+                android:textStyle="bold"
+                android:textSize="12sp"
+                android:textColor="#FFFFFF" />
 
+            <TextView
+                android:id="@+id/tv_transfer_percent"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0%"
+                android:textSize="13sp"
+                android:textColor="#A78BFA"
+                android:textStyle="bold" />
         </LinearLayout>
 
+        <ProgressBar
+            android:id="@+id/transfer_progress_bar"
+            style="@android:style/Widget.ProgressBar.Horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="8dp"
+            android:progressDrawable="@drawable/progress_bar_track"
+            android:max="100"
+            android:progress="0" />
+
+        <TextView
+            android:id="@+id/tv_transfer_meta"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="0 B / 0 B · ETA 00:00"
+            android:textSize="10sp"
+            android:textColor="#6B6890" />
     </LinearLayout>
 
-</androidx.cardview.widget.CardView>
+    <!-- Action Buttons -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="end">
+
+        <Button
+            android:id="@+id/btn_browse_files"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="Select Files"
+            android:textSize="12sp"
+            android:paddingHorizontal="14dp"
+            android:background="@drawable/button_browse_files"
+            android:textColor="#A78BFA"
+            android:textAllCaps="false"
+            android:layout_marginEnd="8dp" />
+
+        <TextView
+            android:id="@+id/tv_tap_hint"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Tap to send clipboard"
+            android:textSize="11sp"
+            android:textColor="#6B6890"
+            android:gravity="center_vertical" />
+    </LinearLayout>
+
+</LinearLayout>

@@ -60,6 +60,10 @@ class WebSocketManager(private val mainActivity: MainActivity) {
 
     private val _chatEvents = MutableSharedFlow<ChatEvent>(extraBufferCapacity = 64)
     val chatEvents: SharedFlow<ChatEvent> = _chatEvents
+    private val _studyStore = MutableStateFlow<List<StudyFile>>(emptyList())
+    val studyStore: StateFlow<List<StudyFile>> = _studyStore
+    private val _studySyncEvents = MutableSharedFlow<StudySyncEvent>(extraBufferCapacity = 64)
+    val studySyncEvents: SharedFlow<StudySyncEvent> = _studySyncEvents
 
     // Emits info about devices that connect to the current session
     private val _deviceConnected = MutableStateFlow<DeviceInfo?>(null)
@@ -355,6 +359,65 @@ class WebSocketManager(private val mainActivity: MainActivity) {
         }.toString())
     }
 
+    fun requestStudyStore() {
+        sendMessage(JSONObject().apply {
+            put("type", "study_store_list")
+            put("sessionId", sessionManager.getCurrentSessionId())
+            put("deviceId", sessionManager.getDeviceId())
+            put("payload", JSONObject())
+            put("timestamp", System.currentTimeMillis())
+        }.toString())
+    }
+
+    fun sendStudySync(mode: String, value: Any) {
+        sendMessage(JSONObject().apply {
+            put("type", "study_sync")
+            put("sessionId", sessionManager.getCurrentSessionId())
+            put("deviceId", sessionManager.getDeviceId())
+            put("payload", JSONObject().apply {
+                put("mode", mode)
+                put("value", value)
+            })
+            put("timestamp", System.currentTimeMillis())
+        }.toString())
+    }
+
+    fun uploadStudyFile(uri: android.net.Uri, fileName: String, fileType: String, fileSize: Long) {
+        scope.launch {
+            try {
+                val ctx = mainActivity.applicationContext
+                val bytes = ctx.contentResolver.openInputStream(uri)?.readBytes() ?: return@launch
+                val base64Data = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                sendMessage(JSONObject().apply {
+                    put("type", "study_store_upload")
+                    put("sessionId", sessionManager.getCurrentSessionId())
+                    put("deviceId", sessionManager.getDeviceId())
+                    put("payload", JSONObject().apply {
+                        put("name", fileName)
+                        put("type", fileType)
+                        put("size", fileSize)
+                        put("data", base64Data)
+                    })
+                    put("timestamp", System.currentTimeMillis())
+                }.toString())
+            } catch (e: Exception) {
+                Log.e("FlowLink", "Failed to upload study file", e)
+            }
+        }
+    }
+
+    fun deleteStudyFile(fileId: String) {
+        sendMessage(JSONObject().apply {
+            put("type", "study_store_delete")
+            put("sessionId", sessionManager.getCurrentSessionId())
+            put("deviceId", sessionManager.getDeviceId())
+            put("payload", JSONObject().apply {
+                put("fileId", fileId)
+            })
+            put("timestamp", System.currentTimeMillis())
+        }.toString())
+    }
+
     fun sendFileUri(targetDeviceId: String, uri: android.net.Uri, fileName: String, fileType: String, fileSize: Long) {
         scope.launch {
             val transferId = "mob-${System.currentTimeMillis()}-${(1000..9999).random()}"
@@ -583,6 +646,34 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                         ChatEvent.Typing(
                             sourceDevice = payload.optString("sourceDevice", ""),
                             isTyping = payload.optBoolean("isTyping", false)
+                        )
+                    )
+                }
+                "study_store_list" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    val filesArr = payload.optJSONArray("files") ?: JSONArray()
+                    val files = mutableListOf<StudyFile>()
+                    for (i in 0 until filesArr.length()) {
+                        val file = filesArr.optJSONObject(i) ?: continue
+                        files.add(
+                            StudyFile(
+                                id = file.optString("id", ""),
+                                name = file.optString("name", "Document"),
+                                type = file.optString("type", "application/octet-stream"),
+                                size = file.optLong("size", 0L),
+                                data = file.optString("data", "")
+                            )
+                        )
+                    }
+                    _studyStore.value = files
+                }
+                "study_sync" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    _studySyncEvents.tryEmit(
+                        StudySyncEvent(
+                            mode = payload.optString("mode", ""),
+                            value = payload.opt("value"),
+                            sourceDevice = payload.optString("sourceDevice", "")
                         )
                     )
                 }
@@ -1120,4 +1211,18 @@ class WebSocketManager(private val mainActivity: MainActivity) {
             val isTyping: Boolean
         ) : ChatEvent()
     }
+
+    data class StudyFile(
+        val id: String,
+        val name: String,
+        val type: String,
+        val size: Long,
+        val data: String
+    )
+
+    data class StudySyncEvent(
+        val mode: String,
+        val value: Any?,
+        val sourceDevice: String
+    )
 }

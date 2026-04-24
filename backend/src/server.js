@@ -579,7 +579,10 @@ function handleSessionJoin(ws, message) {
           permissions: d.permissions,
           joinedAt: d.joinedAt
         })),
-        groups: Array.from(session.groups.values())
+        groups: Array.from(session.groups.values()),
+        studyStore: session.studyStore || [],
+        studyState: session.studyState || null,
+        chatHistory: session.chatHistory || []
       },
       timestamp: Date.now()
     }));
@@ -674,7 +677,10 @@ function handleSessionJoin(ws, message) {
         permissions: d.permissions,
         joinedAt: d.joinedAt
       })),
-      groups: Array.from(session.groups.values())
+      groups: Array.from(session.groups.values()),
+      studyStore: session.studyStore || [],
+      studyState: session.studyState || null,
+      chatHistory: session.chatHistory || []
     },
     timestamp: Date.now()
   }));
@@ -1413,8 +1419,52 @@ function handleChatMessage(ws, message) {
   const { sessionId, deviceId, type } = message;
   const targetDevice = message.payload?.targetDevice;
 
-  if (!sessionId || !deviceId || !targetDevice) {
+  if (!sessionId || !deviceId) {
     sendError(ws, 'Missing chat routing data');
+    return;
+  }
+
+  const session = sessions.get(sessionId);
+  if (!session) {
+    sendError(ws, 'Invalid chat session');
+    return;
+  }
+
+  if (type === 'chat_message') {
+    session.chatHistory = Array.isArray(session.chatHistory) ? session.chatHistory : [];
+    session.chatHistory.push({
+      ...message.payload?.chat,
+      sourceDevice: deviceId,
+      targetDevice: null,
+    });
+    session.chatHistory = session.chatHistory.slice(-200);
+
+    broadcastToSession(sessionId, {
+      ...message,
+      sessionId,
+      payload: {
+        ...message.payload,
+        sourceDevice: deviceId,
+      },
+      timestamp: Date.now()
+    }, deviceId);
+
+    ws.send(JSON.stringify({
+      type: 'chat_delivered',
+      sessionId,
+      deviceId,
+      payload: {
+        messageId: message.payload?.chat?.messageId,
+        sourceDevice: targetDevice,
+        targetDevice: deviceId
+      },
+      timestamp: Date.now()
+    }));
+    return;
+  }
+
+  if (!targetDevice) {
+    sendError(ws, 'Missing targetDevice for chat receipt');
     return;
   }
 
@@ -1435,21 +1485,6 @@ function handleChatMessage(ws, message) {
     },
     timestamp: Date.now()
   }));
-
-  // Acknowledge delivery for message sends so sender can display double-tick.
-  if (type === 'chat_message') {
-    ws.send(JSON.stringify({
-      type: 'chat_delivered',
-      sessionId,
-      deviceId,
-      payload: {
-        messageId: message.payload?.chat?.messageId,
-        sourceDevice: targetDevice,
-        targetDevice: deviceId
-      },
-      timestamp: Date.now()
-    }));
-  }
 }
 
 function handleStudyMessage(ws, message) {
@@ -1464,12 +1499,25 @@ function handleStudyMessage(ws, message) {
     session.studyStore = [];
   }
 
+  if (!session.studyState) {
+    session.studyState = {
+      page: 1,
+      scrollPx: 0,
+      zoom: 1,
+      highlight: '',
+      selectedFileId: '',
+      anchors: [],
+      updatedAt: Date.now(),
+      updatedBy: ''
+    };
+  }
+
   if (type === 'study_store_list') {
     ws.send(JSON.stringify({
       type: 'study_store_list',
       sessionId,
       deviceId,
-      payload: { files: session.studyStore },
+      payload: { files: session.studyStore, state: session.studyState },
       timestamp: Date.now()
     }));
     return;
@@ -1491,7 +1539,7 @@ function handleStudyMessage(ws, message) {
     broadcastToSession(sessionId, {
       type: 'study_store_list',
       sessionId,
-      payload: { files: session.studyStore },
+      payload: { files: session.studyStore, state: session.studyState },
       timestamp: Date.now()
     });
     return;
@@ -1509,21 +1557,53 @@ function handleStudyMessage(ws, message) {
       return;
     }
     session.studyStore = session.studyStore.filter((item) => item.id !== fileId);
+    if (session.studyState.selectedFileId === fileId) {
+      session.studyState = {
+        ...session.studyState,
+        selectedFileId: '',
+        page: 1,
+        scrollPx: 0,
+        anchors: []
+      };
+    }
     broadcastToSession(sessionId, {
       type: 'study_store_list',
       sessionId,
-      payload: { files: session.studyStore },
+      payload: { files: session.studyStore, state: session.studyState },
       timestamp: Date.now()
     });
     return;
   }
 
   if (type === 'study_sync') {
+    const mode = message.payload?.mode;
+    const value = message.payload?.value;
+    if (mode === 'page' && Number.isFinite(value)) {
+      session.studyState.page = Math.max(1, Number(value));
+    } else if (mode === 'scroll_px' && Number.isFinite(value)) {
+      session.studyState.scrollPx = Math.max(0, Number(value));
+    } else if (mode === 'zoom' && Number.isFinite(value)) {
+      session.studyState.zoom = Math.max(0.6, Math.min(3, Number(value)));
+    } else if (mode === 'highlight' && typeof value === 'string') {
+      session.studyState.highlight = value;
+    } else if (mode === 'open_pdf' && typeof value === 'string') {
+      session.studyState.selectedFileId = value;
+      session.studyState.page = 1;
+      session.studyState.scrollPx = 0;
+    } else if (mode === 'highlight_anchor' && value?.id) {
+      const anchors = Array.isArray(session.studyState.anchors) ? session.studyState.anchors.filter((item) => item.id !== value.id) : [];
+      anchors.push(value);
+      session.studyState.anchors = anchors.slice(-120);
+    }
+    session.studyState.updatedAt = Date.now();
+    session.studyState.updatedBy = deviceId;
+
     broadcastToSession(sessionId, {
       type: 'study_sync',
       sessionId,
       payload: {
         ...message.payload,
+        state: session.studyState,
         sourceDevice: deviceId
       },
       timestamp: Date.now()

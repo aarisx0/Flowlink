@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import * as pdfjsLib from 'pdfjs-dist';
 import { QRCodeSVG } from 'qrcode.react';
 import { Session, Device, Intent, Group, FileTransferStatus } from '@shared/types';
 import DeviceTile from './DeviceTile';
@@ -44,6 +45,26 @@ interface StudyStoreFile {
   data: string;
   uploadedBy?: string;
   uploadedAt?: number;
+}
+
+interface StudyHighlightAnchor {
+  id: string;
+  page: number;
+  xPercent?: number;
+  yPercent: number;
+  widthPercent?: number;
+  heightPercent?: number;
+  text: string;
+  sourceDevice?: string;
+}
+
+interface StudySyncState {
+  page?: number;
+  scrollPx?: number;
+  zoom?: number;
+  highlight?: string;
+  selectedFileId?: string;
+  anchors?: StudyHighlightAnchor[];
 }
 
 export default function DeviceTiles({
@@ -93,7 +114,15 @@ export default function DeviceTiles({
   const [studyFiles, setStudyFiles] = useState<StudyStoreFile[]>([]);
   const [studyPage, setStudyPage] = useState(1);
   const [studyScroll, setStudyScroll] = useState(0);
+  const [studyZoom, setStudyZoom] = useState(1.2);
   const [studyHighlight, setStudyHighlight] = useState('');
+  const [studySelectedFileId, setStudySelectedFileId] = useState<string>('');
+  const [studyPdfPageCount, setStudyPdfPageCount] = useState(0);
+  const [studyPdfDataUrl, setStudyPdfDataUrl] = useState<string>('');
+  const [studyHighlights, setStudyHighlights] = useState<StudyHighlightAnchor[]>([]);
+  const [isCollaboratedView, setIsCollaboratedView] = useState(false);
+  const [isCollabQrOpen, setIsCollabQrOpen] = useState(false);
+  const [isStudyFullscreen, setIsStudyFullscreen] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const webrtcManagerRef = useRef<WebRTCManager | null>(null);
   const intentRouterRef = useRef<IntentRouter | null>(null);
@@ -106,6 +135,16 @@ export default function DeviceTiles({
   const chatBodyRef = useRef<HTMLDivElement | null>(null);
   const chatTypingStopTimerRef = useRef<number | null>(null);
   const transferUiTickRef = useRef<Map<string, number>>(new Map());
+  const pdfScrollRef = useRef<HTMLDivElement | null>(null);
+  const collabChatFileInputRef = useRef<HTMLInputElement | null>(null);
+  const pdfPageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const suppressStudyScrollSyncRef = useRef(false);
+  const localStudyInteractionAtRef = useRef(0);
+
+  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+    'pdfjs-dist/build/pdf.worker.min.mjs',
+    import.meta.url
+  ).toString();
 
   const estimateTransferRate = (bytes: number) => Math.max(256 * 1024, 4 * 1024 * 1024 - Math.min(3 * 1024 * 1024, bytes / 8));
 
@@ -206,6 +245,28 @@ export default function DeviceTiles({
       bytes[i] = binary.charCodeAt(i);
     }
     return bytes;
+  };
+
+  const applyStudyState = (state?: StudySyncState | null) => {
+    if (!state) return;
+    if (Number.isFinite(state.page)) {
+      setStudyPage(Math.max(1, Number(state.page)));
+    }
+    if (Number.isFinite(state.scrollPx)) {
+      setStudyScroll(Math.max(0, Number(state.scrollPx)));
+    }
+    if (Number.isFinite(state.zoom)) {
+      setStudyZoom(Math.max(0.6, Math.min(2.4, Number(state.zoom))));
+    }
+    if (typeof state.highlight === 'string') {
+      setStudyHighlight(state.highlight);
+    }
+    if (typeof state.selectedFileId === 'string') {
+      setStudySelectedFileId(state.selectedFileId);
+    }
+    if (Array.isArray(state.anchors)) {
+      setStudyHighlights(state.anchors.slice(-120));
+    }
   };
 
   const downloadReceivedFile = (fileName: string, fileType: string, chunks: Uint8Array[]) => {
@@ -756,18 +817,41 @@ export default function DeviceTiles({
       }
       case 'study_store_list': {
         setStudyFiles(message.payload?.files || []);
+        applyStudyState(message.payload?.state || null);
         break;
       }
       case 'study_sync': {
         const payload = message.payload || {};
+        applyStudyState(payload.state || null);
         if (payload.mode === 'page' && Number.isFinite(payload.value)) {
           setStudyPage(Math.max(1, Number(payload.value)));
         }
-        if (payload.mode === 'scroll' && Number.isFinite(payload.value)) {
+        if (payload.mode === 'scroll_px' && Number.isFinite(payload.value)) {
+          const now = Date.now();
+          if (now - localStudyInteractionAtRef.current > 180) {
+            setStudyScroll(Math.max(0, Number(payload.value)));
+          }
+        } else if (payload.mode === 'scroll' && Number.isFinite(payload.value)) {
           setStudyScroll(Math.max(0, Math.min(100, Number(payload.value))));
+        }
+        if (payload.mode === 'zoom' && Number.isFinite(payload.value)) {
+          const nextZoom = Math.max(0.6, Math.min(2.4, Number(payload.value)));
+          setStudyZoom(nextZoom);
         }
         if (payload.mode === 'highlight' && typeof payload.value === 'string') {
           setStudyHighlight(payload.value);
+        }
+        if (payload.mode === 'open_pdf' && typeof payload.value === 'string') {
+          setStudySelectedFileId(payload.value);
+          setIsStudyOpen(true);
+          setActiveStudyTab('room');
+        }
+        if (payload.mode === 'highlight_anchor' && payload.value?.id) {
+          setStudyHighlights((prev) => {
+            const next = prev.filter((item) => item.id !== payload.value.id);
+            next.push(payload.value as StudyHighlightAnchor);
+            return next.slice(-120);
+          });
         }
         break;
       }
@@ -865,6 +949,24 @@ export default function DeviceTiles({
         // Update groups list
         if (message.payload && message.payload.groups) {
           groupService.setGroups(message.payload.groups);
+        }
+        if (message.payload?.studyStore) {
+          setStudyFiles(message.payload.studyStore);
+        }
+        if (message.payload?.studyState) {
+          applyStudyState(message.payload.studyState);
+        }
+        if (Array.isArray(message.payload?.chatHistory) && message.payload.chatHistory.length) {
+          setChatMessages(message.payload.chatHistory.map((item: any) => ({
+            messageId: item.messageId || `chat-${item.sentAt || Date.now()}`,
+            text: item.text || '',
+            username: item.username || 'Unknown',
+            sourceDevice: item.sourceDevice || '',
+            targetDevice: item.targetDevice || '',
+            sentAt: item.sentAt || Date.now(),
+            delivered: true,
+            seen: false,
+          })));
         }
         break;
 
@@ -1617,7 +1719,7 @@ export default function DeviceTiles({
     }));
   };
 
-  const sendStudySync = (mode: 'page' | 'scroll' | 'highlight', value: number | string) => {
+  const sendStudySync = (mode: 'page' | 'scroll' | 'scroll_px' | 'zoom' | 'highlight' | 'open_pdf' | 'highlight_anchor', value: number | string | object) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     wsRef.current.send(JSON.stringify({
       type: 'study_sync',
@@ -1627,6 +1729,140 @@ export default function DeviceTiles({
       timestamp: Date.now(),
     }));
   };
+
+  const sendStudyAnchor = (anchor: StudyHighlightAnchor) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    wsRef.current.send(JSON.stringify({
+      type: 'study_sync',
+      sessionId: session.id,
+      deviceId,
+      payload: { mode: 'highlight_anchor', value: anchor },
+      timestamp: Date.now(),
+    }));
+  };
+
+  const selectedStudyFile = studyFiles.find((file) => file.id === studySelectedFileId);
+
+  useEffect(() => {
+    if (!selectedStudyFile || selectedStudyFile.type !== 'application/pdf') {
+      setStudyPdfDataUrl('');
+      setStudyPdfPageCount(0);
+      return;
+    }
+    const bytes = base64ToUint8Array(selectedStudyFile.data);
+    const copy = new Uint8Array(bytes.byteLength);
+    copy.set(bytes);
+    const blob = new Blob([copy.buffer], { type: selectedStudyFile.type });
+    const url = URL.createObjectURL(blob);
+    setStudyPdfDataUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [selectedStudyFile?.id]);
+
+  useEffect(() => {
+    const container = pdfScrollRef.current;
+    if (!container) return;
+    const onScroll = () => {
+      if (suppressStudyScrollSyncRef.current) return;
+      localStudyInteractionAtRef.current = Date.now();
+      const scrollPx = Math.max(0, Math.round(container.scrollTop));
+      setStudyScroll(scrollPx);
+      sendStudySync('scroll_px', scrollPx);
+      let closestPage = 1;
+      let minDistance = Number.POSITIVE_INFINITY;
+      pdfPageRefs.current.forEach((node, page) => {
+        const distance = Math.abs(node.offsetTop - container.scrollTop);
+        if (distance < minDistance) {
+          minDistance = distance;
+          closestPage = page;
+        }
+      });
+      if (closestPage !== studyPage) {
+        setStudyPage(closestPage);
+        sendStudySync('page', closestPage);
+      }
+    };
+    container.addEventListener('scroll', onScroll, { passive: true });
+    return () => container.removeEventListener('scroll', onScroll);
+  }, [studyPage]);
+
+  useEffect(() => {
+    const container = pdfScrollRef.current;
+    if (!container) return;
+    suppressStudyScrollSyncRef.current = true;
+    container.scrollTop = Math.max(0, studyScroll);
+    window.setTimeout(() => {
+      suppressStudyScrollSyncRef.current = false;
+    }, 140);
+  }, [studyScroll]);
+
+  useEffect(() => {
+    if (!studyPdfDataUrl || activeStudyTab !== 'room') return;
+    const container = pdfScrollRef.current;
+    if (!container) return;
+    let cancelled = false;
+    const render = async () => {
+      container.innerHTML = '';
+      pdfPageRefs.current.clear();
+      const loadingTask = pdfjsLib.getDocument(studyPdfDataUrl);
+      const pdf = await loadingTask.promise;
+      if (cancelled) return;
+      setStudyPdfPageCount(pdf.numPages);
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        const page = await pdf.getPage(pageNum);
+        if (cancelled) return;
+        const viewport = page.getViewport({ scale: studyZoom });
+        const wrapper = document.createElement('div');
+        wrapper.className = 'study-pdf-page';
+        wrapper.dataset.page = String(pageNum);
+        wrapper.style.position = 'relative';
+        wrapper.style.marginBottom = '12px';
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) continue;
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        await page.render({ canvasContext: ctx, viewport, canvas }).promise;
+        canvas.addEventListener('mouseup', (evt) => {
+          const rect = canvas.getBoundingClientRect();
+          const xPercent = Math.max(0, Math.min(100, ((evt.clientX - rect.left) / rect.width) * 100));
+          const yPercent = Math.max(0, Math.min(100, ((evt.clientY - rect.top) / rect.height) * 100));
+          const anchor: StudyHighlightAnchor = {
+            id: `anchor-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            page: pageNum,
+            xPercent,
+            yPercent,
+            widthPercent: 10,
+            heightPercent: 2.4,
+            text: studyHighlight || 'Highlight',
+            sourceDevice: deviceId,
+          };
+          setStudyHighlights((prev) => prev.concat(anchor).slice(-120));
+          sendStudyAnchor(anchor);
+        });
+        wrapper.appendChild(canvas);
+        studyHighlights
+          .filter((anchor) => anchor.page === pageNum)
+          .forEach((anchor) => {
+            const marker = document.createElement('div');
+            marker.className = 'study-highlight-anchor';
+            marker.style.left = `${anchor.xPercent ?? 50}%`;
+            marker.style.top = `${anchor.yPercent}%`;
+            marker.style.width = `${anchor.widthPercent ?? 10}%`;
+            marker.style.height = `${anchor.heightPercent ?? 2.4}%`;
+            marker.title = anchor.text;
+            wrapper.appendChild(marker);
+          });
+        container.appendChild(wrapper);
+        pdfPageRefs.current.set(pageNum, wrapper);
+      }
+    };
+    void render();
+    return () => {
+      cancelled = true;
+      if (container) container.innerHTML = '';
+      pdfPageRefs.current.clear();
+    };
+  }, [studyPdfDataUrl, activeStudyTab, studyHighlight, deviceId, studyZoom, studyHighlights]);
 
   const handleDragStart = (e: React.DragEvent, item: any) => {
     setDraggedItem(item);
@@ -1699,6 +1935,7 @@ export default function DeviceTiles({
 
   const deviceArray = Array.from(devices.values()).filter(d => d.id !== deviceId);
   const activeTypingDevice = deviceArray.find((d) => typingByDevice[d.id]);
+  const connectedCount = deviceArray.length + 1;
 
   return (
     <div className="device-tiles-container">
@@ -1717,61 +1954,259 @@ export default function DeviceTiles({
           </button>
         </div>
       </div>
-      <div className={`chat-split-panel ${isChatOpen ? 'open' : ''}`}>
-        <div className="chat-inline-header">
-          <h3>Session Chat</h3>
-          <button className="chat-close-btn" onClick={() => setIsChatOpen(false)}>×</button>
-        </div>
-        <div className="chat-panel">
-          <div className="chat-messages" ref={chatBodyRef}>
-            {chatMessages.map((item) => {
-              const own = item.sourceDevice === deviceId;
-              return (
-                <div key={item.messageId} className={`chat-bubble ${own ? 'own' : 'other'}`}>
-                  <div className="chat-meta">
-                    <span>{own ? 'You' : item.username}</span>
-                    <span>{new Date(item.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                  </div>
-                  <div className="chat-text">{renderChatText(item.text)}</div>
-                  {own && (
-                    <div className={`chat-tick ${item.seen ? 'seen' : item.delivered ? 'delivered' : ''}`}>
-                      {item.seen ? '✓✓' : item.delivered ? '✓✓' : '✓'}
+      {!isCollaboratedView && (
+        <>
+          <div className={`chat-split-panel ${isChatOpen ? 'open' : ''}`}>
+            <div className="chat-inline-header">
+              <h3>Session Chat</h3>
+              <button className="chat-close-btn" onClick={() => setIsChatOpen(false)}>×</button>
+            </div>
+            <div className="chat-panel">
+              <div className="chat-messages" ref={chatBodyRef}>
+                {chatMessages.map((item) => {
+                  const own = item.sourceDevice === deviceId;
+                  return (
+                    <div key={item.messageId} className={`chat-bubble ${own ? 'own' : 'other'}`}>
+                      <div className="chat-meta">
+                        <span>{own ? 'You' : item.username}</span>
+                        <span>{new Date(item.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
+                      <div className="chat-text">{renderChatText(item.text)}</div>
+                      {own && (
+                        <div className={`chat-tick ${item.seen ? 'seen' : item.delivered ? 'delivered' : ''}`}>
+                          {item.seen ? '✓✓' : item.delivered ? '✓✓' : '✓'}
+                        </div>
+                      )}
                     </div>
-                  )}
+                  );
+                })}
+                {activeTypingDevice && (
+                  <div className="chat-typing-indicator">
+                    <span>{activeTypingDevice.name} is typing</span>
+                    <span className="typing-dots"><i /><i /><i /></span>
+                  </div>
+                )}
+              </div>
+              <div className="chat-input-row">
+                <textarea
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  placeholder="Type message, code, or link..."
+                />
+                <button onClick={sendChatMessage}>Send</button>
+              </div>
+            </div>
+          </div>
+          <div className={`study-panel ${isStudyOpen ? 'open' : ''}`}>
+            <div className="chat-inline-header">
+              <h3>Study</h3>
+              <button className="chat-close-btn" onClick={() => setIsStudyOpen(false)}>×</button>
+            </div>
+            <div className="study-tabs">
+              <button className={activeStudyTab === 'store' ? 'active' : ''} onClick={() => setActiveStudyTab('store')}>Store</button>
+              <button className={activeStudyTab === 'room' ? 'active' : ''} onClick={() => setActiveStudyTab('room')}>Study Room</button>
+            </div>
+            {activeStudyTab === 'store' ? (
+              <div className="study-store">
+                <label className="study-upload-btn">
+                  Upload Docs
+                  <input
+                    type="file"
+                    accept=".pdf,.doc,.docx,.txt,.ppt,.pptx"
+                    hidden
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) void uploadStudyFile(file);
+                      e.currentTarget.value = '';
+                    }}
+                  />
+                </label>
+                <div className="study-store-list">
+                  {studyFiles.map((file) => (
+                    <div key={file.id} className="study-file-row">
+                      <div>
+                        <strong>{file.name}</strong>
+                        <small>{Math.max(1, Math.round(file.size / 1024))} KB</small>
+                      </div>
+                      <div className="study-file-actions">
+                        <button onClick={() => downloadStudyFile(file)}>Download</button>
+                        {file.type === 'application/pdf' && (
+                          <button
+                            onClick={() => {
+                              setActiveStudyTab('room');
+                              setStudySelectedFileId(file.id);
+                              sendStudySync('open_pdf', file.id);
+                            }}
+                          >
+                            Open
+                          </button>
+                        )}
+                        {session.createdBy === deviceId && (
+                          <button
+                            className="danger"
+                            onClick={() => wsRef.current?.send(JSON.stringify({
+                              type: 'study_store_delete',
+                              sessionId: session.id,
+                              deviceId,
+                              payload: { fileId: file.id },
+                              timestamp: Date.now(),
+                            }))}
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              );
-            })}
-            {activeTypingDevice && (
-              <div className="chat-typing-indicator">
-                <span>{activeTypingDevice.name} is typing</span>
-                <span className="typing-dots"><i /><i /><i /></span>
+              </div>
+            ) : (
+              <div className="study-room">
+                <label>Page</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={studyPage}
+                  onChange={(e) => {
+                    const value = Math.max(1, Number(e.target.value) || 1);
+                    setStudyPage(value);
+                    sendStudySync('page', value);
+                  }}
+                />
+                <label>Scroll Sync (px): {Math.round(studyScroll)}</label>
+                <input
+                  type="range"
+                  min={0}
+                  max={Math.max(100, pdfScrollRef.current?.scrollHeight || 100)}
+                  value={Math.max(0, Math.min(Math.max(100, pdfScrollRef.current?.scrollHeight || 100), studyScroll))}
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    localStudyInteractionAtRef.current = Date.now();
+                    setStudyScroll(value);
+                    sendStudySync('scroll_px', value);
+                  }}
+                />
+                <label>Zoom: {studyZoom.toFixed(2)}x</label>
+                <input
+                  type="range"
+                  min={0.6}
+                  max={2.4}
+                  step={0.05}
+                  value={studyZoom}
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    setStudyZoom(value);
+                    sendStudySync('zoom', value);
+                  }}
+                />
+                <label>Highlight</label>
+                <textarea
+                  value={studyHighlight}
+                  placeholder="Shared highlight/note"
+                  onChange={(e) => {
+                    setStudyHighlight(e.target.value);
+                    sendStudySync('highlight', e.target.value);
+                  }}
+                />
+                <div className="study-pdf-toolbar">
+                  <span>{selectedStudyFile ? selectedStudyFile.name : 'No PDF selected'}</span>
+                  <span>{studyPdfPageCount > 0 ? `${studyPdfPageCount} pages` : ''}</span>
+                  <button className="study-open-full" onClick={() => setIsStudyFullscreen(true)}>Open Full Page</button>
+                </div>
+                <div className="study-pdf-scroll" ref={pdfScrollRef} />
+                <div className="study-anchor-list">
+                  {studyHighlights.slice(-8).map((anchor) => (
+                    <button
+                      key={anchor.id}
+                      onClick={() => {
+                        const target = pdfPageRefs.current.get(anchor.page);
+                        const container = pdfScrollRef.current;
+                        if (!target || !container) return;
+                        container.scrollTop = target.offsetTop + ((anchor.yPercent / 100) * target.clientHeight) - 120;
+                      }}
+                    >
+                      P{anchor.page} - {anchor.text || 'Highlight'}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>
-          <div className="chat-input-row">
-            <textarea
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              placeholder="Type message, code, or link..."
-            />
-            <button onClick={sendChatMessage}>Send</button>
+        </>
+      )}
+      <div className={`study-fullscreen ${isStudyFullscreen ? 'open' : ''}`}>
+        <div className="study-fullscreen-header">
+          <div>
+            <strong>{selectedStudyFile?.name || 'Study Room'}</strong>
+            <span>Page {studyPage} · Zoom {studyZoom.toFixed(2)}x</span>
+          </div>
+          <button className="chat-close-btn" onClick={() => setIsStudyFullscreen(false)}>×</button>
+        </div>
+        <div className="study-fullscreen-body">
+          <div className="study-fullscreen-left">
+            <div className="study-pdf-scroll study-pdf-scroll-full" ref={pdfScrollRef} />
+          </div>
+          <div className="study-fullscreen-right">
+            <h4>Anchors</h4>
+            <div className="study-anchor-list">
+              {studyHighlights.slice(-20).map((anchor) => (
+                <button
+                  key={anchor.id}
+                  onClick={() => {
+                    const target = pdfPageRefs.current.get(anchor.page);
+                    const container = pdfScrollRef.current;
+                    if (!target || !container) return;
+                    container.scrollTop = target.offsetTop + ((anchor.yPercent / 100) * target.clientHeight) - 140;
+                  }}
+                >
+                  P{anchor.page} - {anchor.text || 'Highlight'}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
-      <div className={`study-panel ${isStudyOpen ? 'open' : ''}`}>
+      <div className={`collab-view ${isCollaboratedView ? 'open' : ''}`}>
         <div className="chat-inline-header">
-          <h3>Study</h3>
-          <button className="chat-close-btn" onClick={() => setIsStudyOpen(false)}>×</button>
+          <h3>Collaboration Workspace</h3>
+          <button className="chat-close-btn" onClick={() => setIsCollaboratedView(false)}>×</button>
         </div>
-        <div className="study-tabs">
-          <button className={activeStudyTab === 'store' ? 'active' : ''} onClick={() => setActiveStudyTab('store')}>Store</button>
-          <button className={activeStudyTab === 'room' ? 'active' : ''} onClick={() => setActiveStudyTab('room')}>Study Room</button>
+        <div className="collab-controls">
+          <div className="collab-pill">Session Code: {session.code}</div>
+          <div className="collab-pill">{connectedCount} Active</div>
+          <div className="collab-pill warm">{studyFiles.length} Shared Files</div>
+          <div className="collab-pill soft">{chatMessages.length} Messages</div>
+          <button className="collab-pill collab-pill-btn" onClick={() => setIsCollabQrOpen((prev) => !prev)}>
+            {isCollabQrOpen ? 'Hide QR' : 'Show QR'}
+          </button>
         </div>
-        {activeStudyTab === 'store' ? (
-          <div className="study-store">
-            <label className="study-upload-btn">
-              Upload Docs
+        <div className="collab-grid collab-grid-workspace">
+          <section className="collab-chat-card">
+            <div className="collab-card-head">
+              <h4>Room Chat</h4>
+              <button className="collab-mini-btn" onClick={() => setIsChatOpen(true)}>Pop Out</button>
+            </div>
+            <div className="collab-chat-stream">
+              {chatMessages.length === 0 ? (
+                <div className="collab-empty-state">Say hi to start the chat.</div>
+              ) : chatMessages.slice(-10).map((item) => {
+                const own = item.sourceDevice === deviceId;
+                return (
+                  <div key={item.messageId} className={`collab-chat-message ${own ? 'own' : 'other'}`}>
+                    <div className="collab-chat-author">{own ? 'YOU' : (item.username || 'AARIS').toUpperCase()}</div>
+                    <div className="collab-chat-copy">{item.text}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="collab-chat-compose">
+              <textarea
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                placeholder="Type a message or paste a link..."
+              />
               <input
+                ref={collabChatFileInputRef}
                 type="file"
                 accept=".pdf,.doc,.docx,.txt,.ppt,.pptx"
                 hidden
@@ -1781,80 +2216,213 @@ export default function DeviceTiles({
                   e.currentTarget.value = '';
                 }}
               />
-            </label>
-            <div className="study-store-list">
-              {studyFiles.map((file) => (
-                <div key={file.id} className="study-file-row">
+              <button
+                className="collab-attach-btn"
+                title="Attach file"
+                onClick={() => collabChatFileInputRef.current?.click()}
+              >
+                📎
+              </button>
+              <button onClick={sendChatMessage}>Send</button>
+            </div>
+          </section>
+
+          <section className="collab-files-card">
+            <div className="collab-card-head">
+              <h4>Shared Files</h4>
+              <label className="collab-upload-btn">
+                Select Files
+                <input
+                  type="file"
+                  accept=".pdf,.doc,.docx,.txt,.ppt,.pptx"
+                  hidden
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void uploadStudyFile(file);
+                    e.currentTarget.value = '';
+                  }}
+                />
+              </label>
+            </div>
+            <div className="collab-file-list">
+              {studyFiles.length === 0 ? (
+                <div className="collab-empty-state">No shared files yet.</div>
+              ) : studyFiles.map((file) => (
+                <article key={file.id} className={`collab-file-card ${studySelectedFileId === file.id ? 'active' : ''}`}>
                   <div>
                     <strong>{file.name}</strong>
                     <small>{Math.max(1, Math.round(file.size / 1024))} KB</small>
                   </div>
-                  <div className="study-file-actions">
+                  <div className="collab-file-actions">
                     <button onClick={() => downloadStudyFile(file)}>Download</button>
+                    {file.type === 'application/pdf' && (
+                      <button onClick={() => {
+                        setActiveStudyTab('room');
+                        setStudySelectedFileId(file.id);
+                        setIsStudyFullscreen(true);
+                        sendStudySync('open_pdf', file.id);
+                      }}>Open</button>
+                    )}
                     {session.createdBy === deviceId && (
-                      <button
-                        className="danger"
-                        onClick={() => wsRef.current?.send(JSON.stringify({
-                          type: 'study_store_delete',
-                          sessionId: session.id,
-                          deviceId,
-                          payload: { fileId: file.id },
-                          timestamp: Date.now(),
-                        }))}
-                      >
-                        Delete
-                      </button>
+                      <button className="danger" onClick={() => wsRef.current?.send(JSON.stringify({
+                        type: 'study_store_delete',
+                        sessionId: session.id,
+                        deviceId,
+                        payload: { fileId: file.id },
+                        timestamp: Date.now(),
+                      }))}>Delete</button>
                     )}
                   </div>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <section className="collab-sidebar-card">
+            <div className="collab-card-head">
+              <h4>Devices</h4>
+              <span>{connectedCount} online</span>
+            </div>
+            <div className="collab-device-list">
+              {deviceArray.length === 0 ? (
+                <div className="collab-empty-state">No connected peers yet.</div>
+              ) : deviceArray.map((device) => (
+                <div key={device.id} className="collab-device-row">
+                  <div>
+                    <strong>{device.username || device.name}</strong>
+                    <small>{device.name}</small>
+                  </div>
+                  <span>{transferStatuses[device.id] ? `${Math.round(transferStatuses[device.id]?.progress || 0)}%` : 'Ready'}</span>
                 </div>
               ))}
             </div>
-          </div>
-        ) : (
-          <div className="study-room">
-            <label>Page</label>
-            <input
-              type="number"
-              min={1}
-              value={studyPage}
-              onChange={(e) => {
-                const value = Math.max(1, Number(e.target.value) || 1);
-                setStudyPage(value);
-                sendStudySync('page', value);
-              }}
-            />
-            <label>Scroll Sync: {studyScroll}%</label>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={studyScroll}
-              onChange={(e) => {
-                const value = Number(e.target.value);
-                setStudyScroll(value);
-                sendStudySync('scroll', value);
-              }}
-            />
-            <label>Highlight</label>
-            <textarea
-              value={studyHighlight}
-              placeholder="Shared highlight/note"
-              onChange={(e) => {
-                setStudyHighlight(e.target.value);
-                sendStudySync('highlight', e.target.value);
-              }}
-            />
-          </div>
-        )}
+            <div className="collab-study-state">
+              <h5>Study Room</h5>
+              <p>{selectedStudyFile?.name || 'No file open'}</p>
+              <small>Page {studyPage} · Zoom {studyZoom.toFixed(2)}x · {studyHighlights.length} highlights</small>
+            </div>
+          </section>
+
+          <section className="collab-self-card">
+            {deviceArray.length === 0 ? (
+              <div className="collab-empty-state">No connected device tile yet.</div>
+            ) : (
+              <div className="collab-live-device-stack">
+                {deviceArray.map((device) => (
+                  <DeviceTile
+                    key={`collab-live-${device.id}`}
+                    device={device}
+                    draggedItem={draggedItem}
+                    onDragStart={handleDragStart}
+                    onDragEnd={handleDragEnd}
+                    transferStatus={transferStatuses[device.id]}
+                    onDrop={async (intent) => {
+                      if (!intentRouterRef.current) {
+                        alert('Intent router not ready. Please refresh the page.');
+                        return;
+                      }
+                      try {
+                        const transferMeta = deriveTransferMeta(intent);
+                        if (transferMeta && (intent.intent_type === 'file_handoff' || intent.intent_type === 'batch_file_handoff')) {
+                          await sendFileWithProgress(device.id, intent);
+                        } else {
+                          grantPermissionForIntent(intent, device.id);
+                          await intentRouterRef.current.routeIntent(intent, device.id);
+                        }
+                      } catch (error) {
+                        if (intent.intent_type === 'file_handoff' || intent.intent_type === 'batch_file_handoff') {
+                          clearTransferTimer(device.id);
+                          setTransferStatuses((prev) => {
+                            if (!prev[device.id]) return prev;
+                            const next = { ...prev };
+                            delete next[device.id];
+                            return next;
+                          });
+                        }
+                        alert('Failed to send: ' + error);
+                      }
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+
+          {isCollabQrOpen && (
+            <section className="collab-qr-card">
+              <p>Share this QR code to connect devices:</p>
+              <div className="qr-container-small">
+                <QRCodeSVG value={session.code} size={118} />
+              </div>
+              <p className="session-code-display-small">
+                Session Code: <strong>{session.code}</strong>
+              </p>
+            </section>
+          )}
+
+          <section className="collab-groups-card">
+            <div className="collab-card-head">
+              <h4>Device Groups</h4>
+              <button
+                className="collab-mini-btn"
+                onClick={() => {
+                  const peers = deviceArray.map((d) => d.id);
+                  if (!peers.length) {
+                    alert('No connected devices to add to a group yet.');
+                    return;
+                  }
+                  const name = window.prompt('Group name', `Group ${groups.length + 1}`)?.trim();
+                  if (!name) return;
+                  groupService.createGroup(name, peers, '#6d4aff');
+                }}
+              >
+                + Create Group
+              </button>
+            </div>
+            <p className="collab-drop-hint">Create one group to broadcast to multiple devices.</p>
+            {groups.length === 0 && (
+              <div className="collab-empty-state">No groups yet. Create one to broadcast to multiple devices.</div>
+            )}
+            {groups.length > 0 && (
+              <div className="collab-group-tiles">
+                {groups.map((group) => (
+                  <GroupTile
+                    key={`collab-group-${group.id}`}
+                    group={group}
+                    devices={deviceArray}
+                    onDrop={handleGroupDrop}
+                  />
+                ))}
+              </div>
+            )}
+            {groups.length > 0 && (
+              <div className="collab-device-list">
+                {groups.map((group) => (
+                  <div key={`meta-${group.id}`} className="collab-device-row">
+                    <div>
+                      <strong>{group.name}</strong>
+                      <small>{group.deviceIds.length} devices</small>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
       </div>
       <div className="floating-chat-button-wrap">
-        <button className="floating-chat-button" onClick={() => setIsChatOpen((prev) => !prev)}>
-          Chat {chatUnreadCount > 0 ? `(${chatUnreadCount})` : ''}
+        {!isCollaboratedView && (
+          <button className="floating-chat-button" onClick={() => setIsChatOpen((prev) => !prev)}>
+            Chat {chatUnreadCount > 0 ? `(${chatUnreadCount})` : ''}
+          </button>
+        )}
+        <button className="floating-collab-button" onClick={() => setIsCollaboratedView((prev) => !prev)}>
+          Collaborated View
         </button>
       </div>
 
       {/* Show QR code for session creator */}
-      {session.createdBy === deviceId && (
+      {!isCollaboratedView && session.createdBy === deviceId && (
         <div className="qr-code-section">
           <p className="qr-label">Share this QR code to connect devices:</p>
           <div className="qr-container-small">
@@ -1867,7 +2435,7 @@ export default function DeviceTiles({
       )}
 
       {/* Group Manager */}
-      {deviceArray.length > 0 && (
+      {!isCollaboratedView && deviceArray.length > 0 && (
         <GroupManager
           devices={deviceArray}
           groups={groups}
@@ -1884,6 +2452,7 @@ export default function DeviceTiles({
         />
       )}
 
+      {!isCollaboratedView && (
       <div className="drag-drop-zone">
         <p className="drag-instructions">
           Drag files, links, or text here, then drop onto a device tile
@@ -1992,6 +2561,8 @@ export default function DeviceTiles({
         </div>
       </div>
 
+      )}
+
       {/* Invitation Panel */}
       <InvitationPanel
         sessionId={session.id}
@@ -2003,4 +2574,3 @@ export default function DeviceTiles({
     </div>
   );
 }
-

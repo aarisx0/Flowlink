@@ -11,6 +11,7 @@ let activityList, openWebAppBtn, logoutBtn;
 let receiverUsernameInput, saveReceiverBtn, receiverStatus, receiverList;
 let sendActiveTabBtn, sendTabCollectionBtn;
 let sendFileBtn, sendFileInput, sendFileStatus;
+let transferProgressCard, transferFileName, transferPercent, transferProgressFill, transferProgressMeta;
 
 // State
 let isConnected = false;
@@ -54,6 +55,11 @@ document.addEventListener('DOMContentLoaded', () => {
   sendFileBtn = document.getElementById('sendFileBtn');
   sendFileInput = document.getElementById('sendFileInput');
   sendFileStatus = document.getElementById('sendFileStatus');
+  transferProgressCard = document.getElementById('transferProgressCard');
+  transferFileName = document.getElementById('transferFileName');
+  transferPercent = document.getElementById('transferPercent');
+  transferProgressFill = document.getElementById('transferProgressFill');
+  transferProgressMeta = document.getElementById('transferProgressMeta');
   
   // Load saved data
   loadUserData();
@@ -97,6 +103,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (sendFileStatus) {
         sendFileStatus.textContent = `${data.fileName || 'File'}: ${data.progress || 0}%`;
       }
+      renderTransferProgress(data);
     }
   });
   
@@ -164,6 +171,7 @@ function handleFileSend() {
   let chunkIndex = 0;
 
   sendFileStatus.textContent = `Starting ${file.name}... 0%`;
+  renderTransferProgress({ fileName: file.name, progress: 0, transferredBytes: 0, totalBytes: file.size, speedBytesPerSec: 0, etaSeconds: 0 });
   chrome.runtime.sendMessage({
     type: 'extension_file_transfer_start',
     transferId,
@@ -214,6 +222,42 @@ function handleFileSend() {
       addActivity('tab', `File sent: ${file.name}`);
     });
   });
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes || 0);
+  if (value <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let size = value;
+  let index = 0;
+  while (size >= 1024 && index < units.length - 1) {
+    size /= 1024;
+    index += 1;
+  }
+  return `${size >= 10 || index === 0 ? Math.round(size) : size.toFixed(1)} ${units[index]}`;
+}
+
+function formatEta(seconds) {
+  const total = Math.max(0, Math.round(Number(seconds || 0)));
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+function renderTransferProgress(data) {
+  if (!transferProgressCard) return;
+  const progress = Math.max(0, Math.min(100, Number(data.progress || 0)));
+  transferProgressCard.hidden = false;
+  transferFileName.textContent = data.fileName || 'File transfer';
+  transferPercent.textContent = `${progress}%`;
+  transferProgressFill.style.width = `${progress}%`;
+  transferProgressMeta.textContent = `${formatBytes(data.transferredBytes)} / ${formatBytes(data.totalBytes)} · ${formatBytes(data.speedBytesPerSec)}/s · ETA ${progress >= 100 ? '00:00' : formatEta(data.etaSeconds)}`;
+  if (progress >= 100) {
+    window.setTimeout(() => {
+      if (transferProgressCard) transferProgressCard.hidden = true;
+      if (sendFileStatus) sendFileStatus.textContent = `Sent ${data.fileName || 'file'}`;
+    }, 1400);
+  }
 }
 
 // Handle setup/login

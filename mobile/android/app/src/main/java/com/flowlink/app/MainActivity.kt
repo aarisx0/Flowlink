@@ -13,6 +13,7 @@ import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -32,6 +33,11 @@ import com.flowlink.app.ui.SessionCreatedFragment
 import com.flowlink.app.ui.SessionManagerFragment
 import com.flowlink.app.ui.InvitationDialogFragment
 import com.flowlink.app.ui.UsernameDialogFragment
+import com.flowlink.app.ui.HomeFragment
+import com.flowlink.app.ui.ChatFragment
+import com.flowlink.app.ui.ShareFragment
+import com.flowlink.app.ui.FilesFragment
+import com.flowlink.app.ui.MoreFragment
 import com.flowlink.app.service.NotificationService
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
@@ -224,15 +230,13 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
                     // Session expired, navigate back to session manager
                     runOnUiThread {
                         Toast.makeText(this@MainActivity, "Session ended", Toast.LENGTH_SHORT).show()
+                        binding.bottomNav.visibility = View.GONE
                         // Clear back stack and show session manager
                         supportFragmentManager.popBackStack(null, androidx.fragment.app.FragmentManager.POP_BACK_STACK_INCLUSIVE)
                         supportFragmentManager.beginTransaction()
                             .replace(R.id.fragment_container, SessionManagerFragment())
                             .commit()
                     }
-                    // Reset the expired flag
-                    // Note: This is a workaround since StateFlow doesn't have a reset method
-                    // In production, consider using SharedFlow or Channel instead
                 }
             }
         }
@@ -243,6 +247,14 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
         ) {
             requestPermissionLauncher.launch(Manifest.permission.CAMERA)
         }
+
+        // Setup bottom navigation
+        binding.bottomNav.setOnItemSelectedListener { item ->
+            showSessionTab(item.itemId)
+            true
+        }
+        // Initially hide bottom nav (shown only when in session)
+        binding.bottomNav.visibility = View.GONE
 
         // Show session manager fragment
         if (savedInstanceState == null) {
@@ -271,7 +283,6 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
             android.util.Log.d("FlowLink", "Restoring DeviceTiles view for existing session")
             showDeviceTiles(currentSessionId)
         }
-        
         // If we have a session but WebSocket is disconnected, reconnect
         if (hasActiveSession && currentCode != null && 
             (connectionState is WebSocketManager.ConnectionState.Disconnected || 
@@ -443,15 +454,12 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
     }
 
     fun showDeviceTiles(sessionId: String) {
-        val currentFragment = supportFragmentManager.findFragmentById(R.id.fragment_container)
-        if (currentFragment is DeviceTilesFragment) {
-            return
+        // Show bottom nav and navigate to Home tab
+        runOnUiThread {
+            binding.bottomNav.visibility = View.VISIBLE
+            binding.bottomNav.animate().alpha(1f).translationY(0f).setDuration(300).start()
+            showSessionTab(R.id.nav_home)
         }
-
-        supportFragmentManager.beginTransaction()
-            .replace(R.id.fragment_container, DeviceTilesFragment.newInstance(sessionId))
-            .addToBackStack(null)
-            .commit()
     }
 
     fun showSessionCreated(code: String, sessionId: String) {
@@ -463,6 +471,28 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
         supportFragmentManager.beginTransaction()
             .replace(R.id.fragment_container, SessionCreatedFragment.newInstance(code, sessionId))
             .addToBackStack(null)
+            .commit()
+    }
+
+    private fun showSessionTab(tabId: Int) {
+        val fragment = when (tabId) {
+            R.id.nav_home -> HomeFragment.newInstance()
+            R.id.nav_chat -> ChatFragment.newInstance()
+            R.id.nav_share -> ShareFragment.newInstance()
+            R.id.nav_files -> FilesFragment.newInstance()
+            R.id.nav_more -> MoreFragment.newInstance()
+            else -> HomeFragment.newInstance()
+        }
+        val tag = when (tabId) {
+            R.id.nav_home -> "home"
+            R.id.nav_chat -> "chat"
+            R.id.nav_share -> "share"
+            R.id.nav_files -> "files"
+            R.id.nav_more -> "more"
+            else -> "home"
+        }
+        supportFragmentManager.beginTransaction()
+            .replace(R.id.fragment_container, fragment, tag)
             .commit()
     }
 
@@ -484,11 +514,14 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
             // Clear session
             sessionManager.setSessionActive(false)
             sessionManager.leaveSession()
-            // Always go back to session manager (clear back stack)
-            supportFragmentManager.popBackStack(null, androidx.fragment.app.FragmentManager.POP_BACK_STACK_INCLUSIVE)
-            supportFragmentManager.beginTransaction()
-                .replace(R.id.fragment_container, SessionManagerFragment())
-                .commit()
+            // Hide bottom nav and go back to session manager
+            runOnUiThread {
+                binding.bottomNav.visibility = View.GONE
+                supportFragmentManager.popBackStack(null, androidx.fragment.app.FragmentManager.POP_BACK_STACK_INCLUSIVE)
+                supportFragmentManager.beginTransaction()
+                    .replace(R.id.fragment_container, SessionManagerFragment())
+                    .commit()
+            }
         }
     }
 

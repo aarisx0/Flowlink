@@ -219,6 +219,46 @@ body {
   color: #4b5563;
 }
 
+.transfer-progress-card {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #f8fafc, #eef2ff);
+  border: 1px solid #dbe4ff;
+}
+
+.transfer-progress-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #1f2937;
+}
+
+.transfer-progress-bar {
+  margin-top: 8px;
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: #dbe4ff;
+  overflow: hidden;
+}
+
+.transfer-progress-fill {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #f97316, #2563eb);
+  transition: width 0.18s ease;
+}
+
+.transfer-progress-meta {
+  margin-top: 7px;
+  font-size: 11px;
+  color: #475569;
+}
+
 .receiver-list {
   display: flex;
   flex-wrap: wrap;

@@ -24,6 +24,49 @@ let targetStatuses = {};
 const extensionTransfers = new Map();
 const TRANSFER_CHUNK_SIZE = 128 * 1024;
 
+function notifyExtensionTransferProgress(data) {
+  try {
+    chrome.runtime.sendMessage({
+      type: 'extension_file_transfer_progress',
+      data,
+    });
+  } catch (_err) {
+    // popup likely closed
+  }
+}
+
+function updateExtensionTransferFromAck(payload = {}) {
+  const transferId = payload.transferId;
+  if (!transferId || !extensionTransfers.has(transferId)) return;
+  const current = extensionTransfers.get(transferId);
+  const transferredBytes = Math.max(current.ackedBytes || 0, Number(payload.transferredBytes || 0));
+  const totalBytes = Number(payload.totalBytes || current.totalBytes || 0);
+  const startedAt = current.startedAt || Date.now();
+  const elapsed = Math.max(0.001, (Date.now() - startedAt) / 1000);
+  const speedBytesPerSec = transferredBytes / elapsed;
+  const progress = totalBytes > 0 ? Math.min(100, Math.round((transferredBytes / totalBytes) * 100)) : Number(payload.progress || 0);
+  const etaSeconds = payload.completed ? 0 : Math.max(0, Math.ceil((totalBytes - transferredBytes) / Math.max(1, speedBytesPerSec)));
+  const next = {
+    ...current,
+    ackedBytes: transferredBytes,
+    totalBytes,
+    completed: Boolean(payload.completed),
+  };
+  extensionTransfers.set(transferId, next);
+  notifyExtensionTransferProgress({
+    transferId,
+    fileName: current.fileName,
+    transferredBytes,
+    totalBytes,
+    progress,
+    speedBytesPerSec,
+    etaSeconds,
+  });
+  if (payload.completed || progress >= 100) {
+    setTimeout(() => extensionTransfers.delete(transferId), 1200);
+  }
+}
+
 function normalizeTargetUsernames(value) {
   const rawValues = Array.isArray(value)
     ? value
@@ -115,7 +158,7 @@ async function sendFileToTargets(fileName, fileType, arrayBuffer) {
   }
 
   const transferId = `ext-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  extensionTransfers.set(transferId, { fileName, totalBytes: arrayBuffer.byteLength, transferredBytes: 0 });
+  extensionTransfers.set(transferId, { fileName, totalBytes: arrayBuffer.byteLength, transferredBytes: 0, ackedBytes: 0, startedAt: Date.now() });
 
   for (const targetUsername of targetUsernames) {
     sendMessage({
@@ -152,21 +195,15 @@ async function sendFileToTargets(fileName, fileType, arrayBuffer) {
     }
     offset = nextOffset;
     chunkIndex += 1;
-    extensionTransfers.set(transferId, { fileName, totalBytes: arrayBuffer.byteLength, transferredBytes: offset });
-    try {
-      chrome.runtime.sendMessage({
-        type: 'extension_file_transfer_progress',
-        data: {
-          transferId,
-          fileName,
-          progress: Math.round((offset / arrayBuffer.byteLength) * 100),
-          transferredBytes: offset,
-          totalBytes: arrayBuffer.byteLength
-        }
-      });
-    } catch (_err) {
-      // popup likely closed
-    }
+    const currentTransfer = extensionTransfers.get(transferId) || {};
+    extensionTransfers.set(transferId, {
+      ...currentTransfer,
+      fileName,
+      totalBytes: arrayBuffer.byteLength,
+      transferredBytes: offset,
+      ackedBytes: currentTransfer.ackedBytes || 0,
+      startedAt: currentTransfer.startedAt || Date.now(),
+    });
   }
 
   for (const targetUsername of targetUsernames) {
@@ -184,6 +221,8 @@ async function sendFileToTargets(fileName, fileType, arrayBuffer) {
 }
 
 function forwardTransferStart({ transferId, fileName, fileType, totalBytes }) {
+  extensionTransfers.set(transferId, { fileName, totalBytes, transferredBytes: 0, ackedBytes: 0, startedAt: Date.now() });
+  notifyExtensionTransferProgress({ transferId, fileName, progress: 0, transferredBytes: 0, totalBytes, speedBytesPerSec: 0, etaSeconds: 0 });
   for (const targetUsername of targetUsernames) {
     sendMessage({
       type: 'file_transfer_start',
@@ -792,6 +831,10 @@ function handleMessage(message) {
 
     case 'target_connection_result':
       handleTargetConnectionResult(message.payload);
+      break;
+
+    case 'file_transfer_ack':
+      updateExtensionTransferFromAck(message.payload || {});
       break;
       
     case 'session_invitation':

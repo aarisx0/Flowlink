@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_home"
+        android:icon="@android:drawable/ic_menu_compass"
+        android:title="Home" />
+    <item
+        android:id="@+id/nav_chat"
+        android:icon="@android:drawable/ic_dialog_email"
+        android:title="Chat" />
+    <item
+        android:id="@+id/nav_share"
+        android:icon="@android:drawable/ic_menu_share"
+        android:title="Share" />
+    <item
+        android:id="@+id/nav_files"
+        android:icon="@android:drawable/ic_menu_agenda"
+        android:title="Files" />
+    <item
+        android:id="@+id/nav_more"
+        android:icon="@android:drawable/ic_menu_more"
+        android:title="More" />
+</menu>

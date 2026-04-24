@@ -1,132 +1,271 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Legacy layout kept for DeviceTilesFragment backward compatibility.
+     Navigation now uses the new bottom-nav tab system (HomeFragment, ChatFragment, etc.) -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_gradient">
 
-    <LinearLayout
+    <ScrollView
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:orientation="vertical"
-        android:padding="24dp">
-
-    <TextView
-        android:id="@+id/tv_status"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Connected Devices"
-        android:textSize="20sp"
-        android:textStyle="bold"
-        android:layout_marginBottom="16dp" />
-
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/rv_devices"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1" />
-
-    <LinearLayout
-        android:id="@+id/chat_panel"
-        android:layout_width="match_parent"
-        android:layout_height="220dp"
-        android:layout_marginTop="12dp"
-        android:orientation="vertical"
-        android:background="#F5F7FF"
-        android:padding="10dp"
-        android:translationY="18dp"
-        android:alpha="0"
-        android:visibility="gone">
-
-        <ScrollView
-            android:id="@+id/chat_scroll"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1">
-
-            <TextView
-                android:id="@+id/tv_chat_messages"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textSize="13sp"
-                android:textColor="#1A1A1A"
-                android:text="" />
-        </ScrollView>
+        android:fillViewport="true">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="8dp">
+            android:orientation="vertical"
+            android:padding="14dp"
+            android:paddingBottom="110dp">
 
-            <EditText
-                android:id="@+id/et_chat_input"
-                android:layout_width="0dp"
+            <!-- Header -->
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:hint="Message / link / code..."
-                android:textColor="#111827"
-                android:textColorHint="#6B7280"
-                android:background="#FFFFFFFF"
-                android:minHeight="44dp"
-                android:gravity="top|start"
-                android:inputType="textMultiLine"
-                android:maxLines="4" />
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:layout_marginBottom="8dp">
 
-            <Button
-                android:id="@+id/btn_send_chat"
-                android:layout_width="wrap_content"
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Connected Devices"
+                    android:textColor="#FFFFFF"
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/btn_invite_others"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:background="@drawable/button_primary"
+                    android:text="Invite Others"
+                    android:textAllCaps="false"
+                    android:textColor="@android:color/white"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tv_status"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Send"
-                android:layout_marginStart="8dp" />
+                android:layout_marginBottom="10dp"
+                android:textColor="#B8B5D4"
+                android:textSize="12sp" />
+
+            <!-- Chat Panel -->
+            <LinearLayout
+                android:id="@+id/chat_panel"
+                android:layout_width="match_parent"
+                android:layout_height="260dp"
+                android:layout_marginTop="12dp"
+                android:alpha="0"
+                android:background="@drawable/glass_card_bg"
+                android:orientation="vertical"
+                android:padding="12dp"
+                android:translationY="18dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Room Chat"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <ScrollView
+                    android:id="@+id/chat_scroll"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_marginTop="8dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/glass_card_bg_dark"
+                    android:padding="8dp">
+
+                    <TextView
+                        android:id="@+id/tv_chat_messages"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="#FFFFFF"
+                        android:textSize="13sp" />
+                </ScrollView>
+
+                <TextView
+                    android:id="@+id/tv_chat_typing"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textColor="#A78BFA"
+                    android:textSize="12sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:orientation="horizontal">
+
+                    <EditText
+                        android:id="@+id/et_chat_input"
+                        android:layout_width="0dp"
+                        android:layout_height="42dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/input_glass_bg"
+                        android:gravity="center_vertical"
+                        android:hint="Type a message or paste link..."
+                        android:inputType="textMultiLine"
+                        android:maxLines="3"
+                        android:paddingHorizontal="10dp"
+                        android:textColor="#FFFFFF"
+                        android:textColorHint="#6B6890" />
+
+                    <Button
+                        android:id="@+id/btn_send_chat"
+                        android:layout_width="wrap_content"
+                        android:layout_height="42dp"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/button_primary"
+                        android:text="Send"
+                        android:textAllCaps="false"
+                        android:textColor="@android:color/white" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Study Panel -->
+            <LinearLayout
+                android:id="@+id/study_panel"
+                android:layout_width="match_parent"
+                android:layout_height="230dp"
+                android:layout_marginTop="12dp"
+                android:alpha="0"
+                android:background="@drawable/glass_card_bg"
+                android:orientation="vertical"
+                android:padding="12dp"
+                android:translationY="18dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/tv_study_status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Study Room"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <ScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_marginTop="8dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/glass_card_bg_dark"
+                    android:padding="8dp">
+
+                    <TextView
+                        android:id="@+id/tv_study_store"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="#B8B5D4"
+                        android:textSize="13sp" />
+                </ScrollView>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/btn_study_prev"
+                        android:layout_width="0dp"
+                        android:layout_height="40dp"
+                        android:layout_marginEnd="4dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/btn_ghost_bg"
+                        android:text="Page -"
+                        android:textAllCaps="false"
+                        android:textColor="#B8B5D4" />
+
+                    <Button
+                        android:id="@+id/btn_study_next"
+                        android:layout_width="0dp"
+                        android:layout_height="40dp"
+                        android:layout_marginStart="4dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/button_primary"
+                        android:text="Page +"
+                        android:textAllCaps="false"
+                        android:textColor="@android:color/white" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Devices RecyclerView -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="Connected Devices"
+                android:textColor="#FFFFFF"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rv_devices"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:nestedScrollingEnabled="false" />
         </LinearLayout>
+    </ScrollView>
 
-        <TextView
-            android:id="@+id/tv_chat_typing"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text=""
-            android:textColor="#334155"
-            android:textSize="12sp" />
-    </LinearLayout>
-
+    <!-- Bottom Bar -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="68dp"
+        android:layout_gravity="bottom"
+        android:background="@drawable/bottom_nav_bg"
+        android:elevation="12dp"
+        android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:layout_marginTop="16dp">
-
-        <Button
-            android:id="@+id/btn_invite_others"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Invite Others"
-            android:background="@drawable/button_primary"
-            android:textColor="@color/white"
-            android:layout_marginEnd="8dp" />
+        android:paddingHorizontal="14dp">
 
         <Button
             android:id="@+id/btn_leave_session"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="40dp"
             android:layout_weight="1"
+            android:background="@drawable/btn_danger_bg"
             android:text="Leave Session"
-            android:layout_marginStart="8dp" />
-
+            android:textAllCaps="false"
+            android:textColor="#EF4444" />
     </LinearLayout>
-    </LinearLayout>
 
+    <!-- Chat FAB -->
     <ImageButton
         android:id="@+id/btn_chat_fab"
         android:layout_width="56dp"
         android:layout_height="56dp"
-        android:layout_gravity="bottom|end"
-        android:layout_margin="16dp"
-        android:backgroundTint="#2563EB"
-        android:src="@android:drawable/ic_dialog_email"
-        android:tint="#FFFFFF"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="38dp"
+        android:backgroundTint="#6C63FF"
         android:contentDescription="Chat"
-        android:padding="14dp" />
+        android:padding="14dp"
+        android:src="@android:drawable/ic_dialog_email"
+        android:tint="#FFFFFF" />
+
+    <!-- Study FAB -->
+    <ImageButton
+        android:id="@+id/btn_study_fab"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="38dp"
+        android:backgroundTint="#6C63FF"
+        android:contentDescription="Study"
+        android:padding="14dp"
+        android:src="@android:drawable/ic_menu_agenda"
+        android:tint="#FFFFFF" />
 
 </FrameLayout>
-

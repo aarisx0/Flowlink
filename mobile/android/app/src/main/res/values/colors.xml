@@ -1,31 +1,59 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- FlowLink Custom Colors -->
-    <color name="primary">#007bff</color>
-    <color name="primary_dark">#0056b3</color>
+    <!-- FlowLink Brand Colors -->
+    <color name="brand_purple">#6C63FF</color>
+    <color name="brand_purple_dark">#4A42CC</color>
+    <color name="brand_purple_light">#8B85FF</color>
+    <color name="brand_indigo">#4F46E5</color>
+    <color name="brand_violet">#7C3AED</color>
+
+    <!-- Background Gradient Colors -->
+    <color name="bg_dark">#0D0B1E</color>
+    <color name="bg_mid">#1A1535</color>
+    <color name="bg_surface">#231E45</color>
+
+    <!-- Glass Card Colors -->
+    <color name="glass_bg">#26FFFFFF</color>
+    <color name="glass_border">#40FFFFFF</color>
+    <color name="glass_bg_dark">#1AFFFFFF</color>
+
+    <!-- Text Colors -->
+    <color name="text_primary">#FFFFFF</color>
+    <color name="text_secondary">#B8B5D4</color>
+    <color name="text_hint">#6B6890</color>
+    <color name="text_accent">#A78BFA</color>
+
+    <!-- Status Colors -->
+    <color name="online_green">#22C55E</color>
+    <color name="offline_gray">#6B7280</color>
+    <color name="error">#EF4444</color>
+    <color name="warning">#F59E0B</color>
+    <color name="success">#10B981</color>
+    <color name="info">#3B82F6</color>
+
+    <!-- Bottom Nav -->
+    <color name="nav_bg">#1E1A3E</color>
+    <color name="nav_selected">#6C63FF</color>
+    <color name="nav_unselected">#6B6890</color>
+
+    <!-- Input -->
+    <color name="input_bg">#1AFFFFFF</color>
+    <color name="input_border">#33FFFFFF</color>
+
+    <!-- Legacy aliases (keep for existing code) -->
+    <color name="primary">#6C63FF</color>
+    <color name="primary_dark">#4A42CC</color>
     <color name="white">#FFFFFF</color>
     <color name="black">#000000</color>
-    <color name="text_primary">#333333</color>
-    <color name="text_secondary">#666666</color>
-    <color name="text_hint">#999999</color>
-    <color name="error">#dc3545</color>
-    <color name="success">#28a745</color>
-    <color name="warning">#ffc107</color>
-    <color name="info">#17a2b8</color>
-    <color name="border">#e1e5e9</color>
-    <color name="input_background">#f8f9fa</color>
-    <color name="input_border">#e1e5e9</color>
-    <color name="info_background">#f8f9fa</color>
-    
-    <!-- Standard Android Theme Colors -->
+    <color name="border">#33FFFFFF</color>
+    <color name="input_background">#1AFFFFFF</color>
+    <color name="info_background">#1AFFFFFF</color>
     <color name="purple_200">#FFBB86FC</color>
     <color name="purple_500">#FF6200EE</color>
     <color name="purple_700">#FF3700B3</color>
     <color name="teal_200">#FF03DAC5</color>
     <color name="teal_700">#FF018786</color>
-    
-    <!-- Additional Material Design Colors -->
-    <color name="colorPrimary">#007bff</color>
-    <color name="colorPrimaryDark">#0056b3</color>
-    <color name="colorAccent">#FF03DAC5</color>
+    <color name="colorPrimary">#6C63FF</color>
+    <color name="colorPrimaryDark">#4A42CC</color>
+    <color name="colorAccent">#A78BFA</color>
 </resources>
