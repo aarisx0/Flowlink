@@ -79,6 +79,18 @@ class ShareFragment : Fragment() {
             devices = mutableListOf(),
             onDeviceClick = { device -> handleDeviceTileClick(device) },
             onBrowseFilesClick = { device -> triggerFilePicker(device.id) },
+            onAddFriend = { device ->
+                val mainAct = activity as? MainActivity ?: return@DeviceTileAdapter
+                val username = mainAct.webSocketManager.sessionDevices.value
+                    .firstOrNull { it.id == device.id }?.name ?: device.name
+                val friend = com.flowlink.app.model.Friend(
+                    username = username,
+                    deviceName = device.name,
+                    deviceId = device.id
+                )
+                FriendsFragment.saveFriend(requireContext(), friend)
+                android.widget.Toast.makeText(requireContext(), "Added $username to friends!", android.widget.Toast.LENGTH_SHORT).show()
+            },
             transferStatuses = transferStatuses
         )
         binding.rvDevices.adapter = deviceAdapter

@@ -51,6 +51,39 @@ data class ChatMessage(
     val targetDevice: String,
     val sentAt: Long,
     val delivered: Boolean = false,
-    val seen: Boolean = false
+    val seen: Boolean = false,
+    // file attachment (null = text message)
+    val fileId: String? = null,
+    val fileName: String? = null,
+    val fileType: String? = null,
+    val fileSize: Long = 0L,
+    val fileData: String? = null,   // base64 for small files
+    // reply/tag
+    val replyToId: String? = null,
+    val replyToText: String? = null,
+    val replyToUsername: String? = null
+)
+
+data class DeviceGroup(
+    val id: String,
+    val name: String,
+    val deviceIds: List<String>,
+    val color: String,
+    val createdBy: String
+)
+
+data class Friend(
+    val username: String,
+    val deviceName: String,
+    val deviceId: String,
+    val addedAt: Long = System.currentTimeMillis()
+)
+
+data class AppSettings(
+    val darkTheme: Boolean = true,
+    val readReceiptsEnabled: Boolean = true,
+    val showActiveStatus: Boolean = true,
+    val chatBgImageUri: String? = null,
+    val notificationsEnabled: Boolean = true
 )
 

@@ -399,6 +399,33 @@ class NotificationService(private val context: Context) {
         notificationManager.cancel(notificationId)
     }
 
+    /**
+     * Show SOS alert notification with sound and map link
+     */
+    fun showSosAlert(username: String, mapsUrl: String) {
+        createNotificationChannels()
+        val mapIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(mapsUrl))
+        val pendingIntent = PendingIntent.getActivity(
+            context, 9999, mapIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID_GENERAL)
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentTitle("🆘 SOS Alert!")
+            .setContentText("$username needs help! Tap to open location.")
+            .setStyle(NotificationCompat.BigTextStyle().bigText("$username has sent an SOS alert!\nTap to view their location on Google Maps."))
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .setVibrate(longArrayOf(0, 500, 200, 500, 200, 500))
+            .setSound(android.provider.Settings.System.DEFAULT_ALARM_ALERT_URI)
+            .build()
+        try {
+            notificationManager.notify(9999, notification)
+        } catch (_: SecurityException) {}
+    }
+
     private fun formatBytes(bytes: Long): String {
         if (bytes <= 0L) return "0 B"
         val units = arrayOf("B", "KB", "MB", "GB")

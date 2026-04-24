@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:background="@drawable/glass_card_bg_dark"
+    android:padding="14dp"
+    android:layout_marginBottom="8dp">
+
+    <View
+        android:id="@+id/group_color_dot"
+        android:layout_width="12dp"
+        android:layout_height="12dp"
+        android:background="@drawable/online_dot"
+        android:layout_marginEnd="12dp" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/tv_group_name"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Group Name"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tv_group_count"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="0 devices"
+            android:textColor="#B8B5D4"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <ImageButton
+        android:id="@+id/btn_delete_group"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:background="@drawable/btn_danger_bg"
+        android:src="@android:drawable/ic_menu_delete"
+        android:tint="#EF4444"
+        android:padding="6dp"
+        android:contentDescription="Delete group" />
+
+</LinearLayout>

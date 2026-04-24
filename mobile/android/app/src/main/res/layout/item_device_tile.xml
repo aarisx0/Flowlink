@@ -130,6 +130,18 @@
         android:orientation="horizontal"
         android:gravity="end">
 
+        <!-- Add Friend -->
+        <ImageButton
+            android:id="@+id/btn_add_friend"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="@drawable/glass_card_bg_dark"
+            android:src="@android:drawable/ic_menu_add"
+            android:tint="#22C55E"
+            android:padding="6dp"
+            android:contentDescription="Add friend"
+            android:layout_marginEnd="6dp" />
+
         <Button
             android:id="@+id/btn_browse_files"
             android:layout_width="wrap_content"

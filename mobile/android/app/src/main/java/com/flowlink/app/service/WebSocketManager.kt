@@ -65,6 +65,10 @@ class WebSocketManager(private val mainActivity: MainActivity) {
     private val _studySyncEvents = MutableSharedFlow<StudySyncEvent>(extraBufferCapacity = 64)
     val studySyncEvents: SharedFlow<StudySyncEvent> = _studySyncEvents
 
+    // Groups
+    private val _groups = MutableStateFlow<List<GroupInfo>>(emptyList())
+    val groups: StateFlow<List<GroupInfo>> = _groups
+
     // Emits info about devices that connect to the current session
     private val _deviceConnected = MutableStateFlow<DeviceInfo?>(null)
     val deviceConnected: StateFlow<DeviceInfo?> = _deviceConnected
@@ -310,7 +314,8 @@ class WebSocketManager(private val mainActivity: MainActivity) {
         sendMessage(message)
     }
 
-    fun sendChatMessage(targetDeviceId: String, messageId: String, text: String) {
+    fun sendChatMessage(targetDeviceId: String, messageId: String, text: String,
+                        replyToId: String? = null, replyToText: String? = null, replyToUsername: String? = null) {
         val currentSessionId = sessionManager.getCurrentSessionId()
         val payload = JSONObject().apply {
             put("targetDevice", targetDeviceId)
@@ -320,6 +325,11 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                 put("username", sessionManager.getUsername())
                 put("sentAt", System.currentTimeMillis())
                 put("format", "plain")
+                if (replyToId != null) {
+                    put("replyToId", replyToId)
+                    put("replyToText", replyToText ?: "")
+                    put("replyToUsername", replyToUsername ?: "")
+                }
             })
         }
         sendMessage(JSONObject().apply {
@@ -388,15 +398,20 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                 val ctx = mainActivity.applicationContext
                 val bytes = ctx.contentResolver.openInputStream(uri)?.readBytes() ?: return@launch
                 val base64Data = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                val fileId = "mob-file-${System.currentTimeMillis()}"
                 sendMessage(JSONObject().apply {
                     put("type", "study_store_upload")
                     put("sessionId", sessionManager.getCurrentSessionId())
                     put("deviceId", sessionManager.getDeviceId())
                     put("payload", JSONObject().apply {
-                        put("name", fileName)
-                        put("type", fileType)
-                        put("size", fileSize)
-                        put("data", base64Data)
+                        // Backend expects payload.file.{id, name, type, size, data}
+                        put("file", JSONObject().apply {
+                            put("id", fileId)
+                            put("name", fileName)
+                            put("type", fileType)
+                            put("size", fileSize)
+                            put("data", base64Data)
+                        })
                     })
                     put("timestamp", System.currentTimeMillis())
                 }.toString())
@@ -413,6 +428,78 @@ class WebSocketManager(private val mainActivity: MainActivity) {
             put("deviceId", sessionManager.getDeviceId())
             put("payload", JSONObject().apply {
                 put("fileId", fileId)
+            })
+            put("timestamp", System.currentTimeMillis())
+        }.toString())
+    }
+
+    fun createGroup(name: String, deviceIds: List<String>, color: String = "#6C63FF") {
+        sendMessage(JSONObject().apply {
+            put("type", "group_create")
+            put("sessionId", sessionManager.getCurrentSessionId())
+            put("deviceId", sessionManager.getDeviceId())
+            put("payload", JSONObject().apply {
+                put("name", name)
+                put("color", color)
+                put("deviceIds", org.json.JSONArray(deviceIds))
+            })
+            put("timestamp", System.currentTimeMillis())
+        }.toString())
+    }
+
+    fun deleteGroup(groupId: String) {
+        sendMessage(JSONObject().apply {
+            put("type", "group_delete")
+            put("sessionId", sessionManager.getCurrentSessionId())
+            put("deviceId", sessionManager.getDeviceId())
+            put("payload", JSONObject().apply { put("groupId", groupId) })
+            put("timestamp", System.currentTimeMillis())
+        }.toString())
+    }
+
+    fun broadcastToGroup(groupId: String, text: String) {
+        sendMessage(JSONObject().apply {
+            put("type", "group_broadcast")
+            put("sessionId", sessionManager.getCurrentSessionId())
+            put("deviceId", sessionManager.getDeviceId())
+            put("payload", JSONObject().apply {
+                put("groupId", groupId)
+                put("intent", JSONObject().apply {
+                    put("intent_type", "clipboard_sync")
+                    put("payload", JSONObject().apply {
+                        put("clipboard", JSONObject().apply { put("text", text) })
+                    })
+                    put("auto_open", false)
+                    put("timestamp", System.currentTimeMillis())
+                })
+            })
+            put("timestamp", System.currentTimeMillis())
+        }.toString())
+    }
+
+    // Chat with file attachment
+    fun sendChatFile(targetDeviceId: String, messageId: String, fileName: String,
+                     fileType: String, fileSize: Long, base64Data: String,
+                     replyToId: String? = null) {
+        val currentSessionId = sessionManager.getCurrentSessionId()
+        sendMessage(JSONObject().apply {
+            put("type", "chat_message")
+            put("sessionId", currentSessionId)
+            put("deviceId", sessionManager.getDeviceId())
+            put("payload", JSONObject().apply {
+                put("targetDevice", targetDeviceId)
+                put("chat", JSONObject().apply {
+                    put("messageId", messageId)
+                    put("text", "📎 $fileName")
+                    put("username", sessionManager.getUsername())
+                    put("sentAt", System.currentTimeMillis())
+                    put("fileId", messageId)
+                    put("fileName", fileName)
+                    put("fileType", fileType)
+                    put("fileSize", fileSize)
+                    put("fileData", base64Data)
+                    if (replyToId != null) put("replyToId", replyToId)
+                })
             })
             put("timestamp", System.currentTimeMillis())
         }.toString())
@@ -613,10 +700,19 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                             username = title,
                             sourceDevice = sourceDevice,
                             targetDevice = sessionManager.getDeviceId(),
-                            sentAt = sentAt
+                            sentAt = sentAt,
+                            fileId = chat.optString("fileId").ifEmpty { null },
+                            fileName = chat.optString("fileName").ifEmpty { null },
+                            fileType = chat.optString("fileType").ifEmpty { null },
+                            fileSize = chat.optLong("fileSize", 0L),
+                            fileData = chat.optString("fileData").ifEmpty { null },
+                            replyToId = chat.optString("replyToId").ifEmpty { null },
+                            replyToText = chat.optString("replyToText").ifEmpty { null },
+                            replyToUsername = chat.optString("replyToUsername").ifEmpty { null }
                         )
                     )
-                    mainActivity.notificationService.showNotification(title, text)
+                    val notifText = if (chat.has("fileName")) "📎 ${chat.optString("fileName")}" else text
+                    mainActivity.notificationService.showNotification(title, notifText)
                 }
                 "chat_read" -> {
                     // Can be surfaced in UI later; keep the message flow alive.
@@ -1137,6 +1233,45 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                         Log.e("FlowLink", "Failed to show invitation sent notification", e)
                     }
                 }
+                "group_created", "group_updated", "group_list" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    // Single group event
+                    val groupJson = payload.optJSONObject("group")
+                    if (groupJson != null) {
+                        val newGroup = parseGroupInfo(groupJson)
+                        val updated = _groups.value.toMutableList()
+                        val idx = updated.indexOfFirst { it.id == newGroup.id }
+                        if (idx >= 0) updated[idx] = newGroup else updated.add(newGroup)
+                        _groups.value = updated
+                    }
+                    // Full list
+                    val groupsArr = payload.optJSONArray("groups")
+                    if (groupsArr != null) {
+                        val list = mutableListOf<GroupInfo>()
+                        for (i in 0 until groupsArr.length()) {
+                            val g = groupsArr.optJSONObject(i) ?: continue
+                            list.add(parseGroupInfo(g))
+                        }
+                        _groups.value = list
+                    }
+                }
+                "group_deleted" -> {
+                    val groupId = json.optJSONObject("payload")?.optString("groupId") ?: return
+                    _groups.value = _groups.value.filterNot { it.id == groupId }
+                }
+                "sos_alert" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    val username = payload.optString("username", "Someone")
+                    val mapsUrl = payload.optString("mapsUrl", "")
+                    val lat = payload.optDouble("lat", 0.0)
+                    val lng = payload.optDouble("lng", 0.0)
+                    Log.d("FlowLink", "🆘 SOS from $username at $lat,$lng")
+                    try {
+                        mainActivity.notificationService.showSosAlert(username, mapsUrl)
+                    } catch (e: Exception) {
+                        Log.e("FlowLink", "Failed to show SOS notification", e)
+                    }
+                }
                 "error" -> {
                     // Backend error (e.g., invalid session code). Surface this to the UI,
                     // especially during a join attempt.
@@ -1194,6 +1329,14 @@ class WebSocketManager(private val mainActivity: MainActivity) {
             val sourceDevice: String,
             val targetDevice: String,
             val sentAt: Long,
+            val fileId: String? = null,
+            val fileName: String? = null,
+            val fileType: String? = null,
+            val fileSize: Long = 0L,
+            val fileData: String? = null,
+            val replyToId: String? = null,
+            val replyToText: String? = null,
+            val replyToUsername: String? = null
         ) : ChatEvent()
 
         data class Delivered(
@@ -1225,4 +1368,25 @@ class WebSocketManager(private val mainActivity: MainActivity) {
         val value: Any?,
         val sourceDevice: String
     )
+
+    data class GroupInfo(
+        val id: String,
+        val name: String,
+        val deviceIds: List<String>,
+        val color: String,
+        val createdBy: String
+    )
+
+    private fun parseGroupInfo(json: JSONObject): GroupInfo {
+        val ids = mutableListOf<String>()
+        val arr = json.optJSONArray("deviceIds")
+        if (arr != null) for (i in 0 until arr.length()) ids.add(arr.optString(i))
+        return GroupInfo(
+            id = json.optString("id"),
+            name = json.optString("name"),
+            deviceIds = ids,
+            color = json.optString("color", "#6C63FF"),
+            createdBy = json.optString("createdBy")
+        )
+    }
 }

@@ -1,19 +1,30 @@
 package com.flowlink.app.ui
 
+import android.app.AlertDialog
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.flowlink.app.MainActivity
+import com.flowlink.app.R
 import com.flowlink.app.databinding.FragmentMoreBinding
 import com.flowlink.app.service.SessionManager
+import com.flowlink.app.service.WebSocketManager
+import kotlinx.coroutines.launch
 
 class MoreFragment : Fragment() {
     private var _binding: FragmentMoreBinding? = null
     private val binding get() = _binding!!
     private var sessionManager: SessionManager? = null
+    private var groupsAdapter: GroupsAdapter? = null
 
     companion object {
         fun newInstance() = MoreFragment()
@@ -33,38 +44,131 @@ class MoreFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
         val mainActivity = activity as? MainActivity ?: return
 
-        binding.btnCreateGroup.setOnClickListener {
-            Toast.makeText(requireContext(), "Group creation coming soon", Toast.LENGTH_SHORT).show()
+        // Groups
+        binding.rvGroups.layoutManager = LinearLayoutManager(requireContext())
+        groupsAdapter = GroupsAdapter(
+            groups = mutableListOf(),
+            onDelete = { group ->
+                mainActivity.webSocketManager.deleteGroup(group.id)
+                Toast.makeText(requireContext(), "Deleted group ${group.name}", Toast.LENGTH_SHORT).show()
+            }
+        )
+        binding.rvGroups.adapter = groupsAdapter
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            mainActivity.webSocketManager.groups.collect { groups ->
+                if (groups.isEmpty()) {
+                    binding.tvGroupsEmpty.visibility = View.VISIBLE
+                    binding.rvGroups.visibility = View.GONE
+                } else {
+                    binding.tvGroupsEmpty.visibility = View.GONE
+                    binding.rvGroups.visibility = View.VISIBLE
+                    groupsAdapter?.setGroups(groups)
+                }
+            }
         }
 
-        binding.moreSessionDetails.setOnClickListener {
-            val code = sessionManager?.getCurrentSessionCode()
-            Toast.makeText(requireContext(), "Session Code: ${code ?: "N/A"}", Toast.LENGTH_SHORT).show()
+        binding.btnCreateGroup.setOnClickListener { showCreateGroupDialog(mainActivity) }
+
+        // Navigation to sub-screens
+        binding.moreSessionDetails.setOnClickListener { navigateTo(SessionDetailsFragment.newInstance()) }
+        binding.moreFriends.setOnClickListener { navigateTo(FriendsFragment.newInstance()) }
+        binding.morePermissions.setOnClickListener { navigateTo(PermissionsFragment.newInstance()) }
+        binding.moreSettings.setOnClickListener { navigateTo(SettingsFragment.newInstance()) }
+        binding.moreHelp.setOnClickListener { navigateTo(HelpFragment.newInstance()) }
+        binding.moreAbout.setOnClickListener { navigateTo(AboutFragment.newInstance()) }
+        binding.moreLeaveSession.setOnClickListener { mainActivity.leaveSession() }    }
+
+    private fun navigateTo(fragment: Fragment) {
+        parentFragmentManager.beginTransaction()
+            .replace(R.id.fragment_container, fragment)
+            .addToBackStack(null)
+            .commit()
+    }
+
+    private fun showCreateGroupDialog(mainActivity: MainActivity) {
+        val devices = mainActivity.webSocketManager.sessionDevices.value
+        if (devices.isEmpty()) {
+            Toast.makeText(requireContext(), "No devices connected to add to group", Toast.LENGTH_SHORT).show()
+            return
         }
 
-        binding.morePermissions.setOnClickListener {
-            Toast.makeText(requireContext(), "Permissions coming soon", Toast.LENGTH_SHORT).show()
+        val ctx = requireContext()
+        val dialogView = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 32, 48, 16)
+        }
+        val etName = EditText(ctx).apply {
+            hint = "Group name"
+            setTextColor(android.graphics.Color.WHITE)
+            setHintTextColor(android.graphics.Color.GRAY)
+        }
+        dialogView.addView(etName)
+
+        // Device checkboxes
+        val checkboxes = devices.map { device ->
+            android.widget.CheckBox(ctx).apply {
+                text = device.name
+                setTextColor(android.graphics.Color.WHITE)
+                isChecked = true
+            }.also { dialogView.addView(it) }
         }
 
-        binding.moreSettings.setOnClickListener {
-            Toast.makeText(requireContext(), "Settings coming soon", Toast.LENGTH_SHORT).show()
-        }
-
-        binding.moreHelp.setOnClickListener {
-            Toast.makeText(requireContext(), "Help & Support coming soon", Toast.LENGTH_SHORT).show()
-        }
-
-        binding.moreAbout.setOnClickListener {
-            Toast.makeText(requireContext(), "FlowLink v1.0 - Cross-Device Continuity", Toast.LENGTH_SHORT).show()
-        }
-
-        binding.moreLeaveSession.setOnClickListener {
-            mainActivity.leaveSession()
-        }
+        AlertDialog.Builder(ctx)
+            .setTitle("Create Group")
+            .setView(dialogView)
+            .setPositiveButton("Create") { _, _ ->
+                val name = etName.text.toString().trim()
+                if (name.isEmpty()) {
+                    Toast.makeText(ctx, "Enter a group name", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val selectedIds = devices.filterIndexed { i, _ -> checkboxes[i].isChecked }.map { it.id }
+                if (selectedIds.isEmpty()) {
+                    Toast.makeText(ctx, "Select at least one device", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                mainActivity.webSocketManager.createGroup(name, selectedIds)
+                Toast.makeText(ctx, "Group '$name' created", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
         _binding = null
+    }
+}
+
+class GroupsAdapter(
+    private val groups: MutableList<WebSocketManager.GroupInfo>,
+    private val onDelete: (WebSocketManager.GroupInfo) -> Unit
+) : RecyclerView.Adapter<GroupsAdapter.GroupViewHolder>() {
+
+    class GroupViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        val tvName: TextView = itemView.findViewById(R.id.tv_group_name)
+        val tvCount: TextView = itemView.findViewById(R.id.tv_group_count)
+        val btnDelete: View = itemView.findViewById(R.id.btn_delete_group)
+    }
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): GroupViewHolder {
+        val view = LayoutInflater.from(parent.context).inflate(R.layout.item_group, parent, false)
+        return GroupViewHolder(view)
+    }
+
+    override fun onBindViewHolder(holder: GroupViewHolder, position: Int) {
+        val group = groups[position]
+        holder.tvName.text = group.name
+        holder.tvCount.text = "${group.deviceIds.size} device(s)"
+        holder.btnDelete.setOnClickListener { onDelete(group) }
+    }
+
+    override fun getItemCount() = groups.size
+
+    fun setGroups(newGroups: List<WebSocketManager.GroupInfo>) {
+        groups.clear()
+        groups.addAll(newGroups)
+        notifyDataSetChanged()
     }
 }

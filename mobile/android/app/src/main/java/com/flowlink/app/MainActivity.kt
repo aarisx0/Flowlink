@@ -23,6 +23,7 @@ import androidx.lifecycle.lifecycleScope
 import com.flowlink.app.BuildConfig
 import com.flowlink.app.databinding.ActivityMainBinding
 import com.flowlink.app.model.Intent as FlowIntent
+import com.flowlink.app.model.ChatMessage
 import com.flowlink.app.service.ClipboardSyncService
 import com.flowlink.app.service.ScreenCaptureService
 import com.flowlink.app.service.SessionManager
@@ -54,6 +55,9 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
     lateinit var notificationService: NotificationService
     private var clipboardSyncEnabled = false
     private var pendingScreenShareViewerDeviceId: String? = null
+    
+    // Persistent chat messages (survives fragment recreation)
+    val chatMessages = mutableListOf<ChatMessage>()
     
     private val clipboardReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -494,6 +498,10 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
         supportFragmentManager.beginTransaction()
             .replace(R.id.fragment_container, fragment, tag)
             .commit()
+        // Sync bottom nav selected state without re-triggering listener
+        if (binding.bottomNav.selectedItemId != tabId) {
+            binding.bottomNav.menu.findItem(tabId)?.isChecked = true
+        }
     }
 
     fun leaveSession() {
@@ -514,6 +522,8 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
             // Clear session
             sessionManager.setSessionActive(false)
             sessionManager.leaveSession()
+            // Clear persistent chat history
+            chatMessages.clear()
             // Hide bottom nav and go back to session manager
             runOnUiThread {
                 binding.bottomNav.visibility = View.GONE

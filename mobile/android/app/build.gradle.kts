@@ -56,6 +56,9 @@ dependencies {
     
     // JSON
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
+
+    // Gson for friends persistence
+    implementation("com.google.code.gson:gson:2.10.1")
     
     // WebRTC - Using Infobip's pre-compiled WebRTC library
     // This is a maintained fork of Google's WebRTC for Android

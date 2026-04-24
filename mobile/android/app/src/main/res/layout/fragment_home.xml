@@ -248,74 +248,50 @@
                 android:nestedScrollingEnabled="false"
                 android:layout_marginBottom="20dp" />
 
-            <!-- Study Room Card -->
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Study Room"
-                android:textColor="#FFFFFF"
-                android:textSize="16sp"
-                android:textStyle="bold"
-                android:layout_marginBottom="10dp" />
-
+            <!-- Store Section -->
             <LinearLayout
-                android:id="@+id/study_panel"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:background="@drawable/glass_card_bg"
-                android:padding="16dp">
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="10dp">
 
                 <TextView
-                    android:id="@+id/tv_study_store"
-                    android:layout_width="match_parent"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:text="No docs in store yet."
+                    android:layout_weight="1"
+                    android:text="Store"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tv_store_count"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="0 files"
                     android:textColor="#B8B5D4"
-                    android:textSize="13sp"
-                    android:minHeight="60dp"
-                    android:gravity="center"
-                    android:layout_marginBottom="12dp" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal">
-
-                    <Button
-                        android:id="@+id/btn_study_prev"
-                        android:layout_width="0dp"
-                        android:layout_height="40dp"
-                        android:layout_weight="1"
-                        android:layout_marginEnd="6dp"
-                        android:text="◀ Prev"
-                        android:textAllCaps="false"
-                        android:textColor="#B8B5D4"
-                        android:background="@drawable/btn_ghost_bg" />
-
-                    <TextView
-                        android:id="@+id/tv_study_status"
-                        android:layout_width="0dp"
-                        android:layout_height="40dp"
-                        android:layout_weight="1"
-                        android:gravity="center"
-                        android:text="Page 1"
-                        android:textColor="#A78BFA"
-                        android:textSize="14sp"
-                        android:textStyle="bold" />
-
-                    <Button
-                        android:id="@+id/btn_study_next"
-                        android:layout_width="0dp"
-                        android:layout_height="40dp"
-                        android:layout_weight="1"
-                        android:layout_marginStart="6dp"
-                        android:text="Next ▶"
-                        android:textAllCaps="false"
-                        android:textColor="#FFFFFF"
-                        android:background="@drawable/btn_primary_bg" />
-                </LinearLayout>
+                    android:textSize="12sp" />
             </LinearLayout>
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rv_store_files"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:nestedScrollingEnabled="false"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/tv_study_store"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="No files in store yet. Go to Files tab to upload."
+                android:textColor="#6B6890"
+                android:textSize="13sp"
+                android:gravity="center"
+                android:paddingVertical="16dp"
+                android:background="@drawable/glass_card_bg_dark"
+                android:visibility="visible" />
 
         </LinearLayout>
     </ScrollView>

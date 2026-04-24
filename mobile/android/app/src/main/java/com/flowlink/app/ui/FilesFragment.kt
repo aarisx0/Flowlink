@@ -1,5 +1,6 @@
 package com.flowlink.app.ui
 
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -9,16 +10,19 @@ import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.FileProvider
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.flowlink.app.BuildConfig
 import com.flowlink.app.MainActivity
 import com.flowlink.app.R
 import com.flowlink.app.databinding.FragmentFilesBinding
 import com.flowlink.app.service.SessionManager
 import com.flowlink.app.service.WebSocketManager
 import kotlinx.coroutines.launch
+import java.io.File
 
 class FilesFragment : Fragment() {
     private var _binding: FragmentFilesBinding? = null
@@ -27,6 +31,7 @@ class FilesFragment : Fragment() {
     private var studyPage = 1
     private var studyFiles = listOf<WebSocketManager.StudyFile>()
     private var filesAdapter: StudyFilesAdapter? = null
+    private var isHost = false
 
     private val pickFileLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri ?: return@registerForActivityResult
@@ -44,7 +49,7 @@ class FilesFragment : Fragment() {
                 if (idx != -1 && cursor.moveToFirst()) cursor.getLong(idx) else 0L
             } ?: 0L
             mainActivity.webSocketManager.uploadStudyFile(uri, name, type, size)
-            Toast.makeText(ctx, "Uploading $name to study store", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, "Uploading $name to store", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(ctx, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
         }
@@ -67,12 +72,22 @@ class FilesFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         val mainActivity = activity as? MainActivity ?: return
+        val selfId = sessionManager?.getDeviceId()
+
+        // Determine if this device is the session host (first device = host)
+        isHost = mainActivity.webSocketManager.sessionDevices.value.isEmpty() ||
+                selfId == mainActivity.webSocketManager.sessionDevices.value.firstOrNull()?.id
 
         binding.rvFiles.layoutManager = LinearLayoutManager(requireContext())
         filesAdapter = StudyFilesAdapter(
             files = mutableListOf(),
-            isHost = sessionManager?.getDeviceId() == mainActivity.webSocketManager.sessionDevices.value.firstOrNull()?.id,
-            onOpen = { file -> mainActivity.webSocketManager.sendStudySync("open", file.id) },
+            isHost = isHost,
+            onOpen = { file ->
+                // Host opens file → broadcasts open_pdf to all, then opens viewer
+                if (isHost) mainActivity.webSocketManager.sendStudySync("open_pdf", file.id)
+                openFileViewer(file, mainActivity)
+            },
+            onDownload = { file -> downloadFile(file) },
             onDelete = { file ->
                 mainActivity.webSocketManager.deleteStudyFile(file.id)
                 Toast.makeText(requireContext(), "Deleted ${file.name}", Toast.LENGTH_SHORT).show()
@@ -80,9 +95,7 @@ class FilesFragment : Fragment() {
         )
         binding.rvFiles.adapter = filesAdapter
 
-        binding.btnSelectFiles.setOnClickListener {
-            pickFileLauncher.launch(arrayOf("*/*"))
-        }
+        binding.btnSelectFiles.setOnClickListener { pickFileLauncher.launch(arrayOf("*/*")) }
 
         binding.btnStudyPrev.setOnClickListener {
             studyPage = maxOf(1, studyPage - 1)
@@ -99,29 +112,67 @@ class FilesFragment : Fragment() {
             mainActivity.webSocketManager.studyStore.collect { files ->
                 studyFiles = files
                 filesAdapter?.setFiles(files)
-                binding.tvFilesSubtitle.text = "${files.size} file(s) shared"
-                // Update home fragment file count
-                (parentFragmentManager.findFragmentByTag("home") as? HomeFragment)
-                    ?.updateFileCount(files.size)
+                binding.tvFilesSubtitle.text = "${files.size} file(s) in store"
+                (parentFragmentManager.findFragmentByTag("home") as? HomeFragment)?.updateFileCount(files.size)
             }
         }
 
         viewLifecycleOwner.lifecycleScope.launch {
             mainActivity.webSocketManager.studySyncEvents.collect { event ->
-                if (event.mode == "page") {
-                    val page = when (val v = event.value) {
-                        is Number -> v.toInt()
-                        is String -> v.toIntOrNull() ?: studyPage
-                        else -> studyPage
+                when (event.mode) {
+                    "page" -> {
+                        val page = when (val v = event.value) {
+                            is Number -> v.toInt()
+                            is String -> v.toIntOrNull() ?: studyPage
+                            else -> studyPage
+                        }
+                        studyPage = maxOf(1, page)
+                        updateStudyStatus()
                     }
-                    studyPage = maxOf(1, page)
-                    updateStudyStatus()
+                    "open_pdf" -> {
+                        // Non-host: host opened a file, open it here too
+                        val fileId = event.value?.toString() ?: return@collect
+                        val file = studyFiles.firstOrNull { it.id == fileId } ?: return@collect
+                        openFileViewer(file, mainActivity)
+                    }
                 }
             }
         }
 
         mainActivity.webSocketManager.requestStudyStore()
         updateStudyStatus()
+    }
+
+    private fun openFileViewer(file: WebSocketManager.StudyFile, mainActivity: MainActivity) {
+        val fragment = FileViewerFragment.newInstance(file, isHost)
+        parentFragmentManager.beginTransaction()
+            .replace(R.id.fragment_container, fragment)
+            .addToBackStack(null)
+            .commit()
+    }
+
+    private fun downloadFile(file: WebSocketManager.StudyFile) {
+        if (file.data.isEmpty()) {
+            Toast.makeText(requireContext(), "No data to download", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            val bytes = android.util.Base64.decode(file.data, android.util.Base64.DEFAULT)
+            val dir = File(android.os.Environment.getExternalStoragePublicDirectory(
+                android.os.Environment.DIRECTORY_DOWNLOADS), "FlowLink")
+            dir.mkdirs()
+            val outFile = File(dir, file.name)
+            outFile.writeBytes(bytes)
+            val uri = FileProvider.getUriForFile(requireContext(), "${BuildConfig.APPLICATION_ID}.fileprovider", outFile)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, file.type.ifEmpty { "*/*" })
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(Intent.createChooser(intent, "Open ${file.name}"))
+            Toast.makeText(requireContext(), "Saved to Downloads/FlowLink", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(requireContext(), "Download failed: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun updateStudyStatus() {
@@ -139,13 +190,15 @@ class StudyFilesAdapter(
     private val files: MutableList<WebSocketManager.StudyFile>,
     private val isHost: Boolean,
     private val onOpen: (WebSocketManager.StudyFile) -> Unit,
+    private val onDownload: (WebSocketManager.StudyFile) -> Unit,
     private val onDelete: (WebSocketManager.StudyFile) -> Unit
 ) : RecyclerView.Adapter<StudyFilesAdapter.FileViewHolder>() {
 
     class FileViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         val tvFileIcon: TextView = itemView.findViewById(R.id.tv_file_icon)
         val tvFileName: TextView = itemView.findViewById(R.id.tv_file_name)
-        val tvFileSize: TextView = itemView.findViewById(R.id.tv_file_size)
+        val tvFileMeta: TextView = itemView.findViewById(R.id.tv_file_meta)
+        val btnDownload: ImageButton = itemView.findViewById(R.id.btn_download_file)
         val btnOpen: ImageButton = itemView.findViewById(R.id.btn_open_file)
         val btnDelete: ImageButton = itemView.findViewById(R.id.btn_delete_file)
     }
@@ -158,15 +211,21 @@ class StudyFilesAdapter(
     override fun onBindViewHolder(holder: FileViewHolder, position: Int) {
         val file = files[position]
         holder.tvFileName.text = file.name
-        holder.tvFileSize.text = "${maxOf(1, file.size / 1024)} KB"
+        val sizeKb = maxOf(1, file.size / 1024)
+        val ext = file.name.substringAfterLast('.', "").uppercase()
+        holder.tvFileMeta.text = if (ext.isNotEmpty()) "$ext · $sizeKb KB" else "$sizeKb KB"
         holder.tvFileIcon.text = when {
             file.name.endsWith(".pdf", true) -> "📄"
-            file.name.endsWith(".jpg", true) || file.name.endsWith(".png", true) -> "🖼️"
+            file.name.endsWith(".jpg", true) || file.name.endsWith(".png", true) || file.name.endsWith(".jpeg", true) -> "🖼️"
             file.name.endsWith(".mp4", true) || file.name.endsWith(".mov", true) -> "🎬"
             file.name.endsWith(".mp3", true) || file.name.endsWith(".wav", true) -> "🎵"
+            file.name.endsWith(".doc", true) || file.name.endsWith(".docx", true) -> "📝"
             else -> "📁"
         }
+        holder.btnDownload.setOnClickListener { onDownload(file) }
         holder.btnOpen.setOnClickListener { onOpen(file) }
+        // Open on row tap too
+        holder.itemView.setOnClickListener { onOpen(file) }
         holder.btnDelete.visibility = if (isHost) View.VISIBLE else View.GONE
         holder.btnDelete.setOnClickListener { onDelete(file) }
     }

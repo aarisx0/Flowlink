@@ -15,6 +15,7 @@ class DeviceTileAdapter(
     private val devices: MutableList<Device>,
     private val onDeviceClick: (Device) -> Unit,
     private val onBrowseFilesClick: (Device) -> Unit,
+    private val onAddFriend: ((Device) -> Unit)? = null,
     private val transferStatuses: MutableMap<String, TransferStatus> = mutableMapOf()
 ) : RecyclerView.Adapter<DeviceTileAdapter.DeviceViewHolder>() {
 
@@ -31,6 +32,7 @@ class DeviceTileAdapter(
         val transferMeta: TextView = itemView.findViewById(R.id.tv_transfer_meta)
         val btnBrowseFiles: Button = itemView.findViewById(R.id.btn_browse_files)
         val tvTapHint: TextView = itemView.findViewById(R.id.tv_tap_hint)
+        val btnAddFriend: android.widget.ImageButton = itemView.findViewById(R.id.btn_add_friend)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): DeviceViewHolder {
@@ -82,6 +84,12 @@ class DeviceTileAdapter(
 
         holder.itemView.setOnClickListener { if (isOnline) onDeviceClick(device) }
         holder.btnBrowseFiles.setOnClickListener { if (isOnline) onBrowseFilesClick(device) }
+        if (onAddFriend != null) {
+            holder.btnAddFriend.visibility = View.VISIBLE
+            holder.btnAddFriend.setOnClickListener { onAddFriend.invoke(device) }
+        } else {
+            holder.btnAddFriend.visibility = View.GONE
+        }
     }
 
     override fun getItemCount(): Int = devices.size

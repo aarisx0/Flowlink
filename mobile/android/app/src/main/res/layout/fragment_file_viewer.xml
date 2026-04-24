@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/bg_gradient">
+
+    <!-- Header -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@drawable/glass_card_bg_dark"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="12dp">
+
+        <ImageButton
+            android:id="@+id/btn_back"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="@android:color/transparent"
+            android:src="@android:drawable/ic_menu_revert"
+            android:tint="#FFFFFF"
+            android:contentDescription="Back"
+            android:layout_marginEnd="12dp" />
+
+        <TextView
+            android:id="@+id/tv_file_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Document"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:ellipsize="end"
+            android:maxLines="1" />
+
+        <TextView
+            android:id="@+id/tv_sync_badge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="● Synced"
+            android:textColor="#22C55E"
+            android:textSize="11sp"
+            android:layout_marginEnd="8dp" />
+
+        <ImageButton
+            android:id="@+id/btn_download"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="@drawable/glass_card_bg_dark"
+            android:src="@android:drawable/stat_sys_download"
+            android:tint="#22C55E"
+            android:padding="6dp"
+            android:contentDescription="Download" />
+    </LinearLayout>
+
+    <!-- Page controls -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="8dp">
+
+        <Button
+            android:id="@+id/btn_prev_page"
+            android:layout_width="wrap_content"
+            android:layout_height="34dp"
+            android:text="◀ Prev"
+            android:textAllCaps="false"
+            android:textColor="#B8B5D4"
+            android:textSize="12sp"
+            android:background="@drawable/btn_ghost_bg"
+            android:paddingHorizontal="14dp" />
+
+        <TextView
+            android:id="@+id/tv_page_info"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="Page 1"
+            android:textColor="#A78BFA"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btn_next_page"
+            android:layout_width="wrap_content"
+            android:layout_height="34dp"
+            android:text="Next ▶"
+            android:textAllCaps="false"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp"
+            android:background="@drawable/btn_primary_bg"
+            android:paddingHorizontal="14dp" />
+    </LinearLayout>
+
+    <!-- Scrollable content area -->
+    <ScrollView
+        android:id="@+id/scroll_content"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <!-- Image viewer (for images) -->
+            <ImageView
+                android:id="@+id/iv_content"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:adjustViewBounds="true"
+                android:scaleType="fitCenter"
+                android:visibility="gone" />
+
+            <!-- Text/PDF content viewer -->
+            <TextView
+                android:id="@+id/tv_content"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#FFFFFF"
+                android:textSize="15sp"
+                android:lineSpacingMultiplier="1.6"
+                android:selectable="true"
+                android:visibility="gone" />
+
+            <!-- WebView for HTML/PDF rendering -->
+            <WebView
+                android:id="@+id/wv_content"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="400dp"
+                android:visibility="gone" />
+
+            <!-- Unsupported file placeholder -->
+            <LinearLayout
+                android:id="@+id/ll_unsupported"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:padding="40dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="📁"
+                    android:textSize="48sp"
+                    android:layout_marginBottom="12dp" />
+
+                <TextView
+                    android:id="@+id/tv_unsupported_name"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:layout_marginBottom="8dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Tap Download to save this file"
+                    android:textColor="#B8B5D4"
+                    android:textSize="13sp"
+                    android:gravity="center" />
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- Highlight bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@drawable/glass_card_bg_dark"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="8dp">
+
+        <TextView
+            android:id="@+id/tv_highlight_info"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Select text to highlight for all"
+            android:textColor="#6B6890"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/btn_highlight"
+            android:layout_width="wrap_content"
+            android:layout_height="32dp"
+            android:text="Highlight"
+            android:textAllCaps="false"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp"
+            android:background="@drawable/btn_primary_bg"
+            android:paddingHorizontal="12dp" />
+    </LinearLayout>
+
+</LinearLayout>

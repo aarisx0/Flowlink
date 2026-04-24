@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/bg_gradient">
+
+    <!-- Header -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="18dp"
+        android:paddingTop="20dp"
+        android:paddingBottom="14dp">
+
+        <ImageButton
+            android:id="@+id/btn_back"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/glass_card_bg_dark"
+            android:src="@android:drawable/ic_menu_revert"
+            android:tint="#FFFFFF"
+            android:padding="8dp"
+            android:contentDescription="Back"
+            android:layout_marginEnd="14dp" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Friends"
+            android:textColor="#FFFFFF"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+
+        <!-- SOS Button -->
+        <Button
+            android:id="@+id/btn_sos"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:text="🆘 SOS"
+            android:textSize="14sp"
+            android:textColor="#FFFFFF"
+            android:textAllCaps="false"
+            android:textStyle="bold"
+            android:background="@drawable/btn_danger_bg"
+            android:paddingHorizontal="16dp" />
+    </LinearLayout>
+
+    <!-- SOS info -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="SOS sends your location to all friends immediately"
+        android:textColor="#6B6890"
+        android:textSize="12sp"
+        android:paddingHorizontal="18dp"
+        android:paddingBottom="12dp" />
+
+    <!-- Friends list -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rv_friends"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:paddingHorizontal="14dp"
+        android:clipToPadding="false" />
+
+    <!-- Empty state -->
+    <LinearLayout
+        android:id="@+id/ll_empty"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="👥"
+            android:textSize="48sp"
+            android:layout_marginBottom="12dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="No friends yet"
+            android:textColor="#FFFFFF"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Tap + on a device tile to add friends"
+            android:textColor="#B8B5D4"
+            android:textSize="13sp"
+            android:gravity="center" />
+    </LinearLayout>
+
+</LinearLayout>

@@ -10,6 +10,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.flowlink.app.MainActivity
+import com.flowlink.app.R
 import com.flowlink.app.databinding.FragmentHomeBinding
 import com.flowlink.app.model.Device
 import com.flowlink.app.model.TransferStatus
@@ -24,6 +25,7 @@ class HomeFragment : Fragment() {
     private val connectedDevices = mutableMapOf<String, Device>()
     private val transferStatuses = mutableMapOf<String, TransferStatus>()
     private var deviceAdapter: DeviceTileAdapter? = null
+    private var storeAdapter: HomeStoreAdapter? = null
     private var studyPage = 1
     private var isDrawerOpen = false
     private val transferClearRunnables = mutableMapOf<String, Runnable>()
@@ -85,18 +87,6 @@ class HomeFragment : Fragment() {
             showInvitationDialog()
         }
 
-        // Study controls
-        binding.btnStudyPrev.setOnClickListener {
-            studyPage = maxOf(1, studyPage - 1)
-            updateStudyStatus()
-            mainActivity.webSocketManager.sendStudySync("page", studyPage)
-        }
-        binding.btnStudyNext.setOnClickListener {
-            studyPage += 1
-            updateStudyStatus()
-            mainActivity.webSocketManager.sendStudySync("page", studyPage)
-        }
-
         // Setup devices RecyclerView
         binding.rvDevices.layoutManager = LinearLayoutManager(requireContext())
         deviceAdapter = DeviceTileAdapter(
@@ -107,6 +97,26 @@ class HomeFragment : Fragment() {
             transferStatuses = transferStatuses
         )
         binding.rvDevices.adapter = deviceAdapter
+
+        // Setup store RecyclerView
+        binding.rvStoreFiles.layoutManager = LinearLayoutManager(requireContext())
+        storeAdapter = HomeStoreAdapter(
+            files = mutableListOf(),
+            onDownload = { file ->
+                if (file.data.isEmpty()) { Toast.makeText(requireContext(), "No data", Toast.LENGTH_SHORT).show(); return@HomeStoreAdapter }
+                try {
+                    val bytes = android.util.Base64.decode(file.data, android.util.Base64.DEFAULT)
+                    val dir = java.io.File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "FlowLink")
+                    dir.mkdirs()
+                    val outFile = java.io.File(dir, file.name)
+                    outFile.writeBytes(bytes)
+                    Toast.makeText(requireContext(), "Saved: ${file.name}", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(requireContext(), "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
+        binding.rvStoreFiles.adapter = storeAdapter
 
         // Observe devices
         viewLifecycleOwner.lifecycleScope.launch {
@@ -146,27 +156,26 @@ class HomeFragment : Fragment() {
             }
         }
 
-        // Observe study store
+        // Observe study store — show in home as "Store"
         viewLifecycleOwner.lifecycleScope.launch {
             mainActivity.webSocketManager.studyStore.collect { files ->
-                binding.tvStudyStore.text = if (files.isEmpty()) "No docs in store yet."
-                else files.joinToString("\n") { "• ${it.name} (${maxOf(1, it.size / 1024)} KB)" }
+                if (files.isEmpty()) {
+                    binding.tvStudyStore.visibility = View.VISIBLE
+                    binding.rvStoreFiles.visibility = View.GONE
+                    binding.tvStoreCount.text = "0 files"
+                } else {
+                    binding.tvStudyStore.visibility = View.GONE
+                    binding.rvStoreFiles.visibility = View.VISIBLE
+                    binding.tvStoreCount.text = "${files.size} file(s)"
+                    storeAdapter?.setFiles(files)
+                }
+                updateStats()
             }
         }
 
-        // Observe study sync
+        // Observe study sync (page changes from Files tab)
         viewLifecycleOwner.lifecycleScope.launch {
-            mainActivity.webSocketManager.studySyncEvents.collect { event ->
-                if (event.mode == "page") {
-                    val page = when (val v = event.value) {
-                        is Number -> v.toInt()
-                        is String -> v.toIntOrNull() ?: studyPage
-                        else -> studyPage
-                    }
-                    studyPage = maxOf(1, page)
-                    updateStudyStatus()
-                }
-            }
+            mainActivity.webSocketManager.studySyncEvents.collect { _ -> /* handled in FilesFragment */ }
         }
 
         mainActivity.webSocketManager.requestStudyStore()
@@ -178,9 +187,8 @@ class HomeFragment : Fragment() {
     }
 
     private fun updateStats() {
-        val online = connectedDevices.values.count { it.online }
         binding.tvStatActive.text = connectedDevices.size.toString()
-        binding.tvStatOnline.text = online.toString()
+        binding.tvStatOnline.text = connectedDevices.values.count { it.online }.toString()
     }
 
     fun updateMessageCount(count: Int) {
@@ -192,7 +200,7 @@ class HomeFragment : Fragment() {
     }
 
     private fun updateStudyStatus() {
-        binding.tvStudyStatus.text = "Page $studyPage"
+        // Study status is now managed in FilesFragment
     }
 
     private fun toggleDrawer() {
@@ -246,5 +254,47 @@ class HomeFragment : Fragment() {
     override fun onDestroyView() {
         super.onDestroyView()
         _binding = null
+    }
+}
+
+// Compact store adapter for Home page
+class HomeStoreAdapter(
+    private val files: MutableList<WebSocketManager.StudyFile>,
+    private val onDownload: (WebSocketManager.StudyFile) -> Unit
+) : androidx.recyclerview.widget.RecyclerView.Adapter<HomeStoreAdapter.VH>() {
+
+    class VH(v: View) : androidx.recyclerview.widget.RecyclerView.ViewHolder(v) {
+        val tvIcon: android.widget.TextView = v.findViewById(R.id.tv_file_icon)
+        val tvName: android.widget.TextView = v.findViewById(R.id.tv_file_name)
+        val tvMeta: android.widget.TextView = v.findViewById(R.id.tv_file_meta)
+        val btnDownload: android.widget.ImageButton = v.findViewById(R.id.btn_download_file)
+        val btnOpen: android.widget.ImageButton = v.findViewById(R.id.btn_open_file)
+        val btnDelete: android.widget.ImageButton = v.findViewById(R.id.btn_delete_file)
+    }
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) =
+        VH(LayoutInflater.from(parent.context).inflate(R.layout.item_study_file, parent, false))
+
+    override fun onBindViewHolder(holder: VH, position: Int) {
+        val file = files[position]
+        holder.tvName.text = file.name
+        val ext = file.name.substringAfterLast('.', "").uppercase()
+        holder.tvMeta.text = if (ext.isNotEmpty()) "$ext · ${maxOf(1, file.size / 1024)} KB" else "${maxOf(1, file.size / 1024)} KB"
+        holder.tvIcon.text = when {
+            file.name.endsWith(".pdf", true) -> "📄"
+            file.name.endsWith(".jpg", true) || file.name.endsWith(".png", true) -> "🖼️"
+            file.name.endsWith(".mp4", true) -> "🎬"
+            file.name.endsWith(".mp3", true) -> "🎵"
+            else -> "📁"
+        }
+        holder.btnDownload.setOnClickListener { onDownload(file) }
+        holder.btnOpen.visibility = View.GONE
+        holder.btnDelete.visibility = View.GONE
+    }
+
+    override fun getItemCount() = files.size
+
+    fun setFiles(newFiles: List<WebSocketManager.StudyFile>) {
+        files.clear(); files.addAll(newFiles); notifyDataSetChanged()
     }
 }
