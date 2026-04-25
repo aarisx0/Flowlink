@@ -39,6 +39,7 @@ import com.flowlink.app.ui.ChatFragment
 import com.flowlink.app.ui.ShareFragment
 import com.flowlink.app.ui.FilesFragment
 import com.flowlink.app.ui.MoreFragment
+import com.flowlink.app.ui.BrowserFragment
 import com.flowlink.app.service.NotificationService
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
@@ -498,7 +499,6 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
         supportFragmentManager.beginTransaction()
             .replace(R.id.fragment_container, fragment, tag)
             .commit()
-        // Sync bottom nav selected state without re-triggering listener
         if (binding.bottomNav.selectedItemId != tabId) {
             binding.bottomNav.menu.findItem(tabId)?.isChecked = true
         }
@@ -506,31 +506,33 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
 
     fun leaveSession() {
         lifecycleScope.launch {
-            // Send session_leave message to backend before disconnecting
             val sessionId = sessionManager.getCurrentSessionId()
             if (sessionId != null) {
-                webSocketManager.sendMessage(org.json.JSONObject().apply {
-                    put("type", "session_leave")
-                    put("sessionId", sessionId)
-                    put("deviceId", sessionManager.getDeviceId())
-                    put("timestamp", System.currentTimeMillis())
-                }.toString())
+                try {
+                    webSocketManager.sendMessage(org.json.JSONObject().apply {
+                        put("type", "session_leave")
+                        put("sessionId", sessionId)
+                        put("deviceId", sessionManager.getDeviceId())
+                        put("timestamp", System.currentTimeMillis())
+                    }.toString())
+                } catch (_: Exception) {}
             }
-            
-            // Disconnect WebSocket
             webSocketManager.disconnect()
-            // Clear session
             sessionManager.setSessionActive(false)
             sessionManager.leaveSession()
-            // Clear persistent chat history
             chatMessages.clear()
-            // Hide bottom nav and go back to session manager
             runOnUiThread {
-                binding.bottomNav.visibility = View.GONE
-                supportFragmentManager.popBackStack(null, androidx.fragment.app.FragmentManager.POP_BACK_STACK_INCLUSIVE)
-                supportFragmentManager.beginTransaction()
-                    .replace(R.id.fragment_container, SessionManagerFragment())
-                    .commit()
+                try {
+                    binding.bottomNav.visibility = View.GONE
+                    // Clear entire back stack safely
+                    val fm = supportFragmentManager
+                    repeat(fm.backStackEntryCount) { fm.popBackStackImmediate() }
+                    fm.beginTransaction()
+                        .replace(R.id.fragment_container, SessionManagerFragment())
+                        .commitAllowingStateLoss()
+                } catch (e: Exception) {
+                    android.util.Log.e("FlowLink", "Error navigating after leave", e)
+                }
             }
         }
     }

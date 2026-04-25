@@ -330,6 +330,8 @@ function App() {
           {username && (
             <div className="user-info">
               <span>Welcome, {username}</span>
+              {!session && <span className="session-lock-badge">🔒 No active session</span>}
+              {session && <span className="session-active-badge">🟢 Session {session.code}</span>}
             </div>
           )}
         </header>

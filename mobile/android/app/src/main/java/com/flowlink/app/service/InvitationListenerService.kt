@@ -304,12 +304,37 @@ class InvitationListenerService : Service() {
                         val inviterUsername = invitation.optString("inviterUsername", "")
                         val inviterDeviceName = invitation.optString("inviterDeviceName", "")
                         val message = invitation.optString("message", "")
-                        
-                        // Show notification
                         notificationService.showSessionInvitation(
                             sessionId, sessionCode, inviterUsername, inviterDeviceName, message
                         )
                     }
+                }
+
+                "friend_request" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    val fromUsername = payload.optString("fromUsername", "Someone")
+                    val fromDeviceId = json.optString("deviceId", "")
+                    val fromDeviceName = payload.optString("fromDeviceName", "")
+                    Log.d("FlowLink", "📨 Background received friend request from $fromUsername")
+                    // Add to inbox
+                    com.flowlink.app.ui.InboxFragment.addItem(this, com.flowlink.app.ui.InboxItem(
+                        id = "fr-${System.currentTimeMillis()}",
+                        type = "friend_request",
+                        title = "Friend Request",
+                        body = "$fromUsername wants to be your friend",
+                        fromUsername = fromUsername,
+                        fromDeviceId = fromDeviceId,
+                        fromDeviceName = fromDeviceName
+                    ))
+                    notificationService.showNotification("Friend Request", "$fromUsername wants to be your friend")
+                }
+
+                "sos_alert" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    val username = payload.optString("username", "Someone")
+                    val mapsUrl = payload.optString("mapsUrl", "")
+                    Log.d("FlowLink", "🆘 Background received SOS from $username")
+                    notificationService.showSosAlert(username, mapsUrl)
                 }
                 
                 "nearby_session_broadcast" -> {

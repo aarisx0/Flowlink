@@ -66,17 +66,25 @@ class ChatMessageAdapter(
         if (msg.fileId != null && msg.fileName != null) {
             holder.fileCard.visibility = View.VISIBLE
             holder.tvMessageText.visibility = View.GONE
+            val isVoice = msg.fileType?.startsWith("audio") == true || msg.fileName.endsWith(".m4a") || msg.fileName.startsWith("voice_")
             val ext = msg.fileName.substringAfterLast('.', "").uppercase().take(4)
-            holder.tvFileTypeBadge.text = ext.ifEmpty { "FILE" }
-            holder.tvFileNameBubble.text = msg.fileName
-            val sizeStr = if (msg.fileSize > 0) " · ${formatBytes(msg.fileSize)}" else ""
-            val typeLabel = when {
-                msg.fileType?.startsWith("image") == true -> "Image"
-                msg.fileType?.startsWith("video") == true -> "Video"
-                msg.fileType?.startsWith("audio") == true -> "Audio"
-                else -> ext.ifEmpty { "File" }
+            if (isVoice) {
+                holder.tvFileTypeBadge.text = "🎙"
+                holder.tvFileNameBubble.text = "Voice message"
+                val sizeStr = if (msg.fileSize > 0) formatBytes(msg.fileSize) else ""
+                holder.tvFileMetaBubble.text = "Audio · $sizeStr · Tap ▶ to play"
+            } else {
+                holder.tvFileTypeBadge.text = ext.ifEmpty { "FILE" }
+                holder.tvFileNameBubble.text = msg.fileName
+                val sizeStr = if (msg.fileSize > 0) " · ${formatBytes(msg.fileSize)}" else ""
+                val typeLabel = when {
+                    msg.fileType?.startsWith("image") == true -> "Image"
+                    msg.fileType?.startsWith("video") == true -> "Video"
+                    msg.fileType?.startsWith("audio") == true -> "Audio"
+                    else -> ext.ifEmpty { "File" }
+                }
+                holder.tvFileMetaBubble.text = "$typeLabel$sizeStr"
             }
-            holder.tvFileMetaBubble.text = "$typeLabel$sizeStr"
             holder.btnFileDownload.setOnClickListener { onFileDownload(msg) }
         } else {
             holder.fileCard.visibility = View.GONE

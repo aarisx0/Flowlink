@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/glass_card_bg_dark"
+    android:padding="16dp"
+    android:layout_marginBottom="8dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="10dp">
+
+        <TextView
+            android:id="@+id/tv_inbox_icon"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:gravity="center"
+            android:text="👤"
+            android:textSize="20sp"
+            android:background="@drawable/glass_card_bg"
+            android:layout_marginEnd="12dp" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/tv_inbox_title"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Friend Request"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tv_inbox_body"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="wants to be your friend"
+                android:textColor="#B8B5D4"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tv_inbox_time"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="now"
+            android:textColor="#6B6890"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <!-- Action buttons (shown for friend requests) -->
+    <LinearLayout
+        android:id="@+id/ll_actions"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <Button
+            android:id="@+id/btn_accept"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="8dp"
+            android:text="Accept"
+            android:textColor="#FFFFFF"
+            android:textAllCaps="false"
+            android:background="@drawable/btn_primary_bg" />
+
+        <Button
+            android:id="@+id/btn_decline"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:text="Decline"
+            android:textColor="#EF4444"
+            android:textAllCaps="false"
+            android:background="@drawable/btn_danger_bg" />
+    </LinearLayout>
+
+</LinearLayout>

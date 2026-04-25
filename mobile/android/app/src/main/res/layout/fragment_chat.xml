@@ -139,6 +139,18 @@
             android:maxLines="4"
             android:gravity="center_vertical" />
 
+        <!-- Voice message: hold to record -->
+        <ImageButton
+            android:id="@+id/btn_voice"
+            android:layout_width="42dp"
+            android:layout_height="42dp"
+            android:background="@drawable/glass_card_bg_dark"
+            android:src="@android:drawable/ic_btn_speak_now"
+            android:tint="#A78BFA"
+            android:padding="8dp"
+            android:contentDescription="Hold to record voice"
+            android:layout_marginStart="6dp" />
+
         <Button
             android:id="@+id/btn_send_chat"
             android:layout_width="wrap_content"
@@ -149,7 +161,7 @@
             android:textSize="14sp"
             android:background="@drawable/btn_primary_bg"
             android:paddingHorizontal="18dp"
-            android:layout_marginStart="8dp" />
+            android:layout_marginStart="6dp" />
     </LinearLayout>
 
 </LinearLayout>

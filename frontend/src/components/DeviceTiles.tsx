@@ -845,6 +845,7 @@ export default function DeviceTiles({
           setStudySelectedFileId(payload.value);
           setIsStudyOpen(true);
           setActiveStudyTab('room');
+          setIsStudyFullscreen(true);  // Auto-open fullscreen for readable view
         }
         if (payload.mode === 'highlight_anchor' && payload.value?.id) {
           setStudyHighlights((prev) => {
@@ -2035,6 +2036,7 @@ export default function DeviceTiles({
                             onClick={() => {
                               setActiveStudyTab('room');
                               setStudySelectedFileId(file.id);
+                              setIsStudyFullscreen(true);
                               sendStudySync('open_pdf', file.id);
                             }}
                           >

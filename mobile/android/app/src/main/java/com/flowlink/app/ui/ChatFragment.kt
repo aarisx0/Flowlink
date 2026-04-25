@@ -1,7 +1,11 @@
 package com.flowlink.app.ui
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.media.MediaPlayer
+import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Bundle
 import android.text.Editable
@@ -11,12 +15,14 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.flowlink.app.BuildConfig
 import com.flowlink.app.MainActivity
+import com.flowlink.app.R
 import com.flowlink.app.databinding.FragmentChatBinding
 import com.flowlink.app.model.ChatMessage
 import com.flowlink.app.service.SessionManager
@@ -33,6 +39,13 @@ class ChatFragment : Fragment() {
     private var chatTypingStopRunnable: Runnable? = null
     private var typingIndicatorRunnable: Runnable? = null
     private var replyToMessage: ChatMessage? = null
+    private var mediaRecorder: MediaRecorder? = null
+    private var voiceFile: File? = null
+    private var isRecording = false
+
+    private val requestMicPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) startVoiceRecording() else Toast.makeText(requireContext(), "Microphone permission needed", Toast.LENGTH_SHORT).show()
+    }
 
     // Access persistent list from MainActivity
     private val chatMessages: MutableList<ChatMessage> get() = (activity as? MainActivity)?.chatMessages ?: mutableListOf()
@@ -138,6 +151,26 @@ class ChatFragment : Fragment() {
         binding.btnSendChat.setOnClickListener { sendChatMessage() }
         binding.btnAttach.setOnClickListener { pickFileLauncher.launch(arrayOf("*/*")) }
         binding.btnCancelReply.setOnClickListener { clearReply() }
+
+        // Voice message: hold to record, release to send
+        binding.btnVoice.setOnTouchListener { _, event ->
+            when (event.action) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    if (ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.RECORD_AUDIO)
+                        == PackageManager.PERMISSION_GRANTED) {
+                        startVoiceRecording()
+                    } else {
+                        requestMicPermission.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                    true
+                }
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                    stopVoiceRecordingAndSend()
+                    true
+                }
+                else -> false
+            }
+        }
 
         binding.etChatInput.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
@@ -287,6 +320,94 @@ class ChatFragment : Fragment() {
         val loop = Runnable { renderTypingIndicator() }
         typingIndicatorRunnable = loop
         binding.tvChatTyping.postDelayed(loop, 350)
+    }
+
+    private fun startVoiceRecording() {
+        if (isRecording) return
+        try {
+            val file = File(requireContext().cacheDir, "voice_${System.currentTimeMillis()}.m4a")
+            voiceFile = file
+            @Suppress("DEPRECATION")
+            val recorder = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                MediaRecorder(requireContext())
+            } else {
+                MediaRecorder()
+            }
+            recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
+            recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+            recorder.setOutputFile(file.absolutePath)
+            recorder.prepare()
+            recorder.start()
+            mediaRecorder = recorder
+            isRecording = true
+            binding.btnVoice.setBackgroundResource(R.drawable.btn_danger_bg)
+            Toast.makeText(requireContext(), "🎙 Recording…", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(requireContext(), "Recording failed: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun stopVoiceRecordingAndSend() {
+        if (!isRecording) return
+        try {
+            mediaRecorder?.stop()
+            mediaRecorder?.release()
+            mediaRecorder = null
+            isRecording = false
+            binding.btnVoice.setBackgroundResource(R.drawable.glass_card_bg_dark)
+
+            val file = voiceFile ?: return
+            if (!file.exists() || file.length() < 100) {
+                Toast.makeText(requireContext(), "Recording too short", Toast.LENGTH_SHORT).show()
+                file.delete()
+                return
+            }
+
+            val mainActivity = activity as? MainActivity ?: return
+            val selfId = sessionManager?.getDeviceId() ?: return
+
+            // Read file and send on IO thread to avoid blocking UI
+            viewLifecycleOwner.lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    val bytes = file.readBytes()
+                    val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                    val messageId = "mob-voice-${System.currentTimeMillis()}"
+                    val name = "voice_${System.currentTimeMillis()}.m4a"
+                    val fileSize = file.length()
+                    file.delete()
+
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        val msg = ChatMessage(
+                            messageId = messageId, text = "🎙 Voice message",
+                            username = sessionManager?.getUsername().orEmpty(),
+                            sourceDevice = selfId, targetDevice = "",
+                            sentAt = System.currentTimeMillis(), delivered = false, seen = false,
+                            fileId = messageId, fileName = name, fileType = "audio/mp4",
+                            fileSize = fileSize, fileData = base64
+                        )
+                        chatMessages.add(msg)
+                        chatAdapter?.notifyItemInserted(chatMessages.size - 1)
+                        binding.rvChatMessages.scrollToPosition(chatMessages.size - 1)
+                        Toast.makeText(requireContext(), "Voice message sent", Toast.LENGTH_SHORT).show()
+                    }
+
+                    mainActivity.webSocketManager.sessionDevices.value
+                        .filter { it.id != selfId }
+                        .forEach { device ->
+                            mainActivity.webSocketManager.sendChatFile(
+                                device.id, messageId, name, "audio/mp4", fileSize, base64
+                            )
+                        }
+                } catch (e: Exception) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        Toast.makeText(requireContext(), "Failed to send voice: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Toast.makeText(requireContext(), "Failed to send voice: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
     }
 
     override fun onDestroyView() {

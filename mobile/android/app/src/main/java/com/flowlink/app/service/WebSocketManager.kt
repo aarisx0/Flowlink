@@ -69,6 +69,14 @@ class WebSocketManager(private val mainActivity: MainActivity) {
     private val _groups = MutableStateFlow<List<GroupInfo>>(emptyList())
     val groups: StateFlow<List<GroupInfo>> = _groups
 
+    // Browser sync events from other devices
+    private val _browserSyncEvents = MutableSharedFlow<BrowserSyncEvent>(extraBufferCapacity = 32)
+    val browserSyncEvents: SharedFlow<BrowserSyncEvent> = _browserSyncEvents
+
+    // Friend request events
+    private val _friendRequestEvents = MutableSharedFlow<FriendRequestEvent>(extraBufferCapacity = 16)
+    val friendRequestEvents: SharedFlow<FriendRequestEvent> = _friendRequestEvents
+
     // Emits info about devices that connect to the current session
     private val _deviceConnected = MutableStateFlow<DeviceInfo?>(null)
     val deviceConnected: StateFlow<DeviceInfo?> = _deviceConnected
@@ -431,6 +439,70 @@ class WebSocketManager(private val mainActivity: MainActivity) {
             })
             put("timestamp", System.currentTimeMillis())
         }.toString())
+    }
+
+    /** Send browser state (URL, scroll, zoom, selection) to all session devices */
+    fun sendBrowserSync(mode: String, value: String) {
+        sendMessage(JSONObject().apply {
+            put("type", "browser_sync")
+            put("sessionId", sessionManager.getCurrentSessionId())
+            put("deviceId", sessionManager.getDeviceId())
+            put("payload", JSONObject().apply {
+                put("mode", mode)
+                put("value", value)
+            })
+            put("timestamp", System.currentTimeMillis())
+        }.toString())
+    }
+
+    /** Send a friend request to a user by username (works outside session via global registry) */
+    fun sendFriendRequest(toUsername: String) {
+        sendMessage(JSONObject().apply {
+            put("type", "friend_request")
+            put("deviceId", sessionManager.getDeviceId())
+            put("payload", JSONObject().apply {
+                put("fromUsername", sessionManager.getUsername())
+                put("fromDeviceName", sessionManager.getDeviceName())
+                put("toUsername", toUsername)
+            })
+            put("timestamp", System.currentTimeMillis())
+        }.toString())
+    }
+
+    /** Accept or reject a friend request */
+    fun respondFriendRequest(toDeviceId: String, toUsername: String, accepted: Boolean) {
+        sendMessage(JSONObject().apply {
+            put("type", "friend_request_response")
+            put("deviceId", sessionManager.getDeviceId())
+            put("payload", JSONObject().apply {
+                put("fromUsername", sessionManager.getUsername())
+                put("fromDeviceName", sessionManager.getDeviceName())
+                put("toDeviceId", toDeviceId)
+                put("toUsername", toUsername)
+                put("accepted", accepted)
+            })
+            put("timestamp", System.currentTimeMillis())
+        }.toString())
+    }
+
+    /** Send SOS to specific device IDs (friends, works globally) */
+    fun sendSosToDevices(deviceIds: List<String>, lat: Double, lng: Double, mapsUrl: String) {
+        val username = sessionManager.getUsername()
+        deviceIds.forEach { targetId ->
+            sendMessage(JSONObject().apply {
+                put("type", "sos_alert")
+                put("deviceId", sessionManager.getDeviceId())
+                put("payload", JSONObject().apply {
+                    put("targetDeviceId", targetId)
+                    put("username", username)
+                    put("lat", lat)
+                    put("lng", lng)
+                    put("mapsUrl", mapsUrl)
+                    put("message", "🆘 $username needs help!")
+                })
+                put("timestamp", System.currentTimeMillis())
+            }.toString())
+        }
     }
 
     fun createGroup(name: String, deviceIds: List<String>, color: String = "#6C63FF") {
@@ -1272,6 +1344,43 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                         Log.e("FlowLink", "Failed to show SOS notification", e)
                     }
                 }
+                "browser_sync" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    val mode = payload.optString("mode", "")
+                    val value = payload.optString("value", "")
+                    val sourceDevice = json.optString("deviceId", "")
+                    if (mode.isNotEmpty()) {
+                        _browserSyncEvents.tryEmit(BrowserSyncEvent(mode, value, sourceDevice))
+                    }
+                }
+                "friend_request" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    _friendRequestEvents.tryEmit(FriendRequestEvent(
+                        type = "received",
+                        fromUsername = payload.optString("fromUsername"),
+                        fromDeviceId = json.optString("deviceId"),
+                        fromDeviceName = payload.optString("fromDeviceName"),
+                        accepted = false
+                    ))
+                    mainActivity.notificationService.showNotification(
+                        "Friend Request",
+                        "${payload.optString("fromUsername")} wants to be your friend"
+                    )
+                }
+                "friend_request_response" -> {
+                    val payload = json.optJSONObject("payload") ?: return
+                    val accepted = payload.optBoolean("accepted", false)
+                    _friendRequestEvents.tryEmit(FriendRequestEvent(
+                        type = if (accepted) "accepted" else "rejected",
+                        fromUsername = payload.optString("fromUsername"),
+                        fromDeviceId = json.optString("deviceId"),
+                        fromDeviceName = payload.optString("fromDeviceName"),
+                        accepted = accepted
+                    ))
+                    val msg = if (accepted) "${payload.optString("fromUsername")} accepted your friend request!"
+                              else "${payload.optString("fromUsername")} declined your friend request"
+                    mainActivity.notificationService.showNotification("Friend Request", msg)
+                }
                 "error" -> {
                     // Backend error (e.g., invalid session code). Surface this to the UI,
                     // especially during a join attempt.
@@ -1375,6 +1484,20 @@ class WebSocketManager(private val mainActivity: MainActivity) {
         val deviceIds: List<String>,
         val color: String,
         val createdBy: String
+    )
+
+    data class BrowserSyncEvent(
+        val mode: String,
+        val value: String,
+        val sourceDevice: String
+    )
+
+    data class FriendRequestEvent(
+        val type: String,       // "received" | "accepted" | "rejected"
+        val fromUsername: String,
+        val fromDeviceId: String,
+        val fromDeviceName: String,
+        val accepted: Boolean
     )
 
     private fun parseGroupInfo(json: JSONObject): GroupInfo {

@@ -72,6 +72,8 @@ class MoreFragment : Fragment() {
 
         // Navigation to sub-screens
         binding.moreSessionDetails.setOnClickListener { navigateTo(SessionDetailsFragment.newInstance()) }
+        binding.moreInbox.setOnClickListener { navigateTo(InboxFragment.newInstance()) }
+        binding.moreBrowser.setOnClickListener { navigateTo(BrowserFragment.newInstance()) }
         binding.moreFriends.setOnClickListener { navigateTo(FriendsFragment.newInstance()) }
         binding.morePermissions.setOnClickListener { navigateTo(PermissionsFragment.newInstance()) }
         binding.moreSettings.setOnClickListener { navigateTo(SettingsFragment.newInstance()) }

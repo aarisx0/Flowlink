@@ -85,8 +85,13 @@ class DeviceTileAdapter(
         holder.itemView.setOnClickListener { if (isOnline) onDeviceClick(device) }
         holder.btnBrowseFiles.setOnClickListener { if (isOnline) onBrowseFilesClick(device) }
         if (onAddFriend != null) {
-            holder.btnAddFriend.visibility = View.VISIBLE
-            holder.btnAddFriend.setOnClickListener { onAddFriend.invoke(device) }
+            // Hide + if already friend or pending
+            val alreadyAdded = FriendsFragment.isFriendOrPending(holder.itemView.context, device.id)
+            holder.btnAddFriend.visibility = if (alreadyAdded) View.GONE else View.VISIBLE
+            holder.btnAddFriend.setOnClickListener {
+                onAddFriend.invoke(device)
+                holder.btnAddFriend.visibility = View.GONE  // hide immediately after tap
+            }
         } else {
             holder.btnAddFriend.visibility = View.GONE
         }

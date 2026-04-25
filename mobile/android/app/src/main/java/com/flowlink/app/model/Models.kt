@@ -76,7 +76,16 @@ data class Friend(
     val username: String,
     val deviceName: String,
     val deviceId: String,
-    val addedAt: Long = System.currentTimeMillis()
+    val addedAt: Long = System.currentTimeMillis(),
+    val status: String = "accepted"  // "pending_sent" | "pending_received" | "accepted"
+)
+
+data class FriendRequest(
+    val fromUsername: String,
+    val fromDeviceId: String,
+    val fromDeviceName: String,
+    val toUsername: String,
+    val timestamp: Long = System.currentTimeMillis()
 )
 
 data class AppSettings(

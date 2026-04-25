@@ -3,10 +3,8 @@ package com.flowlink.app.ui
 import android.Manifest
 import android.app.AlertDialog
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.LocationManager
-import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -17,14 +15,17 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.flowlink.app.MainActivity
 import com.flowlink.app.R
 import com.flowlink.app.databinding.FragmentFriendsBinding
 import com.flowlink.app.model.Friend
+import com.flowlink.app.service.WebSocketManager
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 class FriendsFragment : Fragment() {
@@ -47,13 +48,32 @@ class FriendsFragment : Fragment() {
 
         fun newInstance() = FriendsFragment()
 
+        /** Save an accepted friend (called after request accepted) */
         fun saveFriend(ctx: Context, friend: Friend) {
             val prefs = ctx.getSharedPreferences(PREFS_KEY, Context.MODE_PRIVATE)
             val list = loadFriends(ctx).toMutableList()
+            // Remove any pending entry for same deviceId, then add accepted
+            list.removeAll { it.deviceId == friend.deviceId }
+            list.add(friend.copy(status = "accepted"))
+            prefs.edit().putString("list", Gson().toJson(list)).apply()
+        }
+
+        /** Save a pending-sent request */
+        fun savePendingSent(ctx: Context, friend: Friend) {
+            val prefs = ctx.getSharedPreferences(PREFS_KEY, Context.MODE_PRIVATE)
+            val list = loadFriends(ctx).toMutableList()
             if (list.none { it.deviceId == friend.deviceId }) {
-                list.add(friend)
+                list.add(friend.copy(status = "pending_sent"))
                 prefs.edit().putString("list", Gson().toJson(list)).apply()
             }
+        }
+
+        /** Remove a friend or pending entry */
+        fun removeFriend(ctx: Context, deviceId: String) {
+            val prefs = ctx.getSharedPreferences(PREFS_KEY, Context.MODE_PRIVATE)
+            val list = loadFriends(ctx).toMutableList()
+            list.removeAll { it.deviceId == deviceId }
+            prefs.edit().putString("list", Gson().toJson(list)).apply()
         }
 
         fun loadFriends(ctx: Context): List<Friend> {
@@ -62,6 +82,10 @@ class FriendsFragment : Fragment() {
             return try {
                 Gson().fromJson(json, object : TypeToken<List<Friend>>() {}.type)
             } catch (_: Exception) { emptyList() }
+        }
+
+        fun isFriendOrPending(ctx: Context, deviceId: String): Boolean {
+            return loadFriends(ctx).any { it.deviceId == deviceId }
         }
     }
 
@@ -72,48 +96,83 @@ class FriendsFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        val mainActivity = activity as? MainActivity ?: return
 
         binding.btnBack.setOnClickListener { parentFragmentManager.popBackStack() }
 
-        friends.clear()
-        friends.addAll(loadFriends(requireContext()))
+        loadAndDisplay()
 
         binding.rvFriends.layoutManager = LinearLayoutManager(requireContext())
-        friendsAdapter = FriendsAdapter(friends) { friend ->
-            AlertDialog.Builder(requireContext())
-                .setTitle("Remove Friend")
-                .setMessage("Remove ${friend.username} from friends?")
-                .setPositiveButton("Remove") { _, _ ->
-                    friends.remove(friend)
-                    friendsAdapter?.notifyDataSetChanged()
-                    saveFriendsList()
-                    updateEmptyState()
-                }
-                .setNegativeButton("Cancel", null)
-                .show()
-        }
+        friendsAdapter = FriendsAdapter(
+            friends = friends,
+            onRemove = { friend ->
+                AlertDialog.Builder(requireContext())
+                    .setTitle("Remove Friend")
+                    .setMessage("Remove ${friend.username}?")
+                    .setPositiveButton("Remove") { _, _ ->
+                        removeFriend(requireContext(), friend.deviceId)
+                        loadAndDisplay()
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }
+        )
         binding.rvFriends.adapter = friendsAdapter
         updateEmptyState()
 
+        // SOS button
         binding.btnSos.setOnClickListener {
+            val accepted = friends.filter { it.status == "accepted" }
+            if (accepted.isEmpty()) {
+                Toast.makeText(requireContext(), "No accepted friends to send SOS to", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
             AlertDialog.Builder(requireContext())
                 .setTitle("🆘 Send SOS?")
-                .setMessage("This will send your current location to all ${friends.size} friend(s) immediately.")
+                .setMessage("Send your location to ${accepted.size} friend(s)?")
                 .setPositiveButton("Send SOS") { _, _ -> checkLocationAndSend() }
                 .setNegativeButton("Cancel", null)
                 .show()
         }
+
+        // Observe friend request events
+        viewLifecycleOwner.lifecycleScope.launch {
+            mainActivity.webSocketManager.friendRequestEvents.collect { event ->
+                when (event.type) {
+                    "accepted" -> {
+                        // Mark as accepted in storage
+                        saveFriend(requireContext(), Friend(
+                            username = event.fromUsername,
+                            deviceName = event.fromDeviceName,
+                            deviceId = event.fromDeviceId,
+                            status = "accepted"
+                        ))
+                        loadAndDisplay()
+                        Toast.makeText(requireContext(), "✅ ${event.fromUsername} accepted your request!", Toast.LENGTH_SHORT).show()
+                    }
+                    "rejected" -> {
+                        removeFriend(requireContext(), event.fromDeviceId)
+                        loadAndDisplay()
+                        Toast.makeText(requireContext(), "${event.fromUsername} declined your request", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun loadAndDisplay() {
+        friends.clear()
+        friends.addAll(loadFriends(requireContext()))
+        friendsAdapter?.notifyDataSetChanged()
+        updateEmptyState()
     }
 
     private fun checkLocationAndSend() {
         val ctx = requireContext()
-        val fineGranted = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        val coarseGranted = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        if (fineGranted || coarseGranted) {
-            sendSOS()
-        } else {
-            requestLocation.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
-        }
+        val fine = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (fine || coarse) sendSOS()
+        else requestLocation.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
     }
 
     private fun sendSOS() {
@@ -123,47 +182,21 @@ class FriendsFragment : Fragment() {
             val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
             val location = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
                 ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-
             val lat = location?.latitude ?: 0.0
             val lng = location?.longitude ?: 0.0
             val mapsUrl = "https://maps.google.com/?q=$lat,$lng"
-            val username = mainActivity.sessionManager.getUsername()
-
-            // Send SOS to all friends via WebSocket
-            val sosPayload = JSONObject().apply {
-                put("type", "sos_alert")
-                put("sessionId", mainActivity.sessionManager.getCurrentSessionId())
-                put("deviceId", mainActivity.sessionManager.getDeviceId())
-                put("payload", JSONObject().apply {
-                    put("username", username)
-                    put("lat", lat)
-                    put("lng", lng)
-                    put("mapsUrl", mapsUrl)
-                    put("message", "🆘 $username needs help!")
-                })
-                put("timestamp", System.currentTimeMillis())
-            }
-            mainActivity.webSocketManager.sendMessage(sosPayload.toString())
-
-            Toast.makeText(ctx, "🆘 SOS sent to ${friends.size} friend(s)!", Toast.LENGTH_LONG).show()
+            val acceptedIds = friends.filter { it.status == "accepted" }.map { it.deviceId }
+            mainActivity.webSocketManager.sendSosToDevices(acceptedIds, lat, lng, mapsUrl)
+            Toast.makeText(ctx, "🆘 SOS sent to ${acceptedIds.size} friend(s)!", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
             Toast.makeText(ctx, "SOS failed: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
-    private fun saveFriendsList() {
-        val prefs = requireContext().getSharedPreferences(PREFS_KEY, Context.MODE_PRIVATE)
-        prefs.edit().putString("list", Gson().toJson(friends)).apply()
-    }
-
     private fun updateEmptyState() {
-        if (friends.isEmpty()) {
-            binding.rvFriends.visibility = View.GONE
-            binding.llEmpty.visibility = View.VISIBLE
-        } else {
-            binding.rvFriends.visibility = View.VISIBLE
-            binding.llEmpty.visibility = View.GONE
-        }
+        val isEmpty = friends.isEmpty()
+        binding.rvFriends.visibility = if (isEmpty) View.GONE else View.VISIBLE
+        binding.llEmpty.visibility = if (isEmpty) View.VISIBLE else View.GONE
     }
 
     override fun onDestroyView() {
@@ -191,7 +224,11 @@ class FriendsAdapter(
         val f = friends[position]
         holder.tvInitial.text = f.username.firstOrNull()?.uppercaseChar()?.toString() ?: "U"
         holder.tvUsername.text = f.username
-        holder.tvDevice.text = f.deviceName
+        holder.tvDevice.text = when (f.status) {
+            "pending_sent" -> "⏳ Request sent"
+            "pending_received" -> "📩 Wants to connect"
+            else -> f.deviceName
+        }
         holder.btnRemove.setOnClickListener { onRemove(f) }
     }
 

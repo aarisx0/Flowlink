@@ -1,13 +1,19 @@
 package com.flowlink.app.ui
 
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.pdf.PdfRenderer
 import android.os.Bundle
+import android.os.ParcelFileDescriptor
 import android.util.Base64
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.webkit.WebSettings
+import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.core.content.FileProvider
 import androidx.fragment.app.Fragment
@@ -17,7 +23,9 @@ import com.flowlink.app.MainActivity
 import com.flowlink.app.R
 import com.flowlink.app.databinding.FragmentFileViewerBinding
 import com.flowlink.app.service.WebSocketManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 class FileViewerFragment : Fragment() {
@@ -27,9 +35,12 @@ class FileViewerFragment : Fragment() {
     private var fileId: String = ""
     private var fileName: String = ""
     private var fileType: String = ""
-    private var fileData: String = ""   // base64
+    private var fileData: String = ""
     private var currentPage = 1
+    private var totalPages = 1
     private var isHost = false
+    private var pdfRenderer: PdfRenderer? = null
+    private var pdfFile: File? = null
 
     companion object {
         fun newInstance(file: WebSocketManager.StudyFile, isHost: Boolean): FileViewerFragment {
@@ -67,30 +78,30 @@ class FileViewerFragment : Fragment() {
         binding.btnBack.setOnClickListener { parentFragmentManager.popBackStack() }
         binding.btnDownload.setOnClickListener { downloadFile() }
 
-        // Page controls (only meaningful for multi-page docs)
         binding.btnPrevPage.setOnClickListener {
             if (currentPage > 1) {
                 currentPage--
-                updatePageInfo()
+                renderCurrentPage()
                 if (isHost) mainActivity.webSocketManager.sendStudySync("page", currentPage)
             }
         }
         binding.btnNextPage.setOnClickListener {
-            currentPage++
-            updatePageInfo()
-            if (isHost) mainActivity.webSocketManager.sendStudySync("page", currentPage)
+            if (currentPage < totalPages) {
+                currentPage++
+                renderCurrentPage()
+                if (isHost) mainActivity.webSocketManager.sendStudySync("page", currentPage)
+            }
         }
 
-        // Highlight button
         binding.btnHighlight.setOnClickListener {
-            val selected = binding.tvContent.text?.toString()?.take(100) ?: ""
-            if (selected.isNotEmpty() && isHost) {
-                mainActivity.webSocketManager.sendStudySync("highlight", selected)
+            val text = binding.tvContent.text?.toString()?.take(100) ?: ""
+            if (text.isNotEmpty() && isHost) {
+                mainActivity.webSocketManager.sendStudySync("highlight", text)
                 Toast.makeText(requireContext(), "Highlight synced", Toast.LENGTH_SHORT).show()
             }
         }
 
-        // Observe sync events from other devices
+        // Observe sync events
         viewLifecycleOwner.lifecycleScope.launch {
             mainActivity.webSocketManager.studySyncEvents.collect { event ->
                 when (event.mode) {
@@ -100,91 +111,126 @@ class FileViewerFragment : Fragment() {
                             is String -> v.toIntOrNull() ?: currentPage
                             else -> currentPage
                         }
-                        currentPage = maxOf(1, page)
-                        updatePageInfo()
+                        currentPage = page.coerceIn(1, totalPages)
+                        renderCurrentPage()
                     }
                     "scroll_px" -> {
-                        val px = when (val v = event.value) {
-                            is Number -> v.toInt()
-                            else -> 0
-                        }
+                        val px = (event.value as? Number)?.toInt() ?: 0
                         binding.scrollContent.smoothScrollTo(0, px)
                     }
                     "highlight" -> {
-                        val text = event.value?.toString() ?: ""
-                        binding.tvHighlightInfo.text = "Highlighted: \"${text.take(40)}…\""
+                        binding.tvHighlightInfo.text = "Highlighted: \"${event.value?.toString()?.take(40)}\""
                     }
                 }
             }
         }
 
-        // Sync scroll position when user scrolls (host only)
+        // Sync scroll (host only)
         if (isHost) {
             binding.scrollContent.viewTreeObserver.addOnScrollChangedListener {
-                val scrollY = binding.scrollContent.scrollY
-                mainActivity.webSocketManager.sendStudySync("scroll_px", scrollY)
+                mainActivity.webSocketManager.sendStudySync("scroll_px", binding.scrollContent.scrollY)
             }
         }
 
-        renderContent()
-        updatePageInfo()
+        // Notify others this file is open
+        if (isHost) mainActivity.webSocketManager.sendStudySync("open_pdf", fileId)
 
-        // Notify others that this file is open
-        if (isHost) {
-            mainActivity.webSocketManager.sendStudySync("open_pdf", fileId)
-        }
+        // Render content
+        viewLifecycleOwner.lifecycleScope.launch { renderContent() }
     }
 
-    private fun renderContent() {
-        if (fileData.isEmpty()) {
-            showUnsupported()
-            return
-        }
+    private suspend fun renderContent() {
+        if (fileData.isEmpty()) { showUnsupported(); return }
         try {
             val bytes = Base64.decode(fileData, Base64.DEFAULT)
             when {
-                fileType.startsWith("image/") -> {
+                fileType.startsWith("image/") -> withContext(Dispatchers.Main) {
                     val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                     binding.ivContent.setImageBitmap(bmp)
                     binding.ivContent.visibility = View.VISIBLE
+                    binding.wvContent.visibility = View.GONE
+                    binding.tvContent.visibility = View.GONE
+                    binding.llUnsupported.visibility = View.GONE
                 }
-                fileType == "text/plain" || fileName.endsWith(".txt", true) -> {
+                fileType == "text/plain" || fileName.endsWith(".txt", true) -> withContext(Dispatchers.Main) {
                     binding.tvContent.text = String(bytes, Charsets.UTF_8)
                     binding.tvContent.visibility = View.VISIBLE
+                    binding.ivContent.visibility = View.GONE
+                    binding.wvContent.visibility = View.GONE
+                    binding.llUnsupported.visibility = View.GONE
                 }
                 fileType == "application/pdf" || fileName.endsWith(".pdf", true) -> {
-                    // Render PDF via WebView using data URI
-                    val base64Str = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-                    binding.wvContent.settings.apply {
-                        javaScriptEnabled = true
-                        builtInZoomControls = true
-                        displayZoomControls = false
-                        loadWithOverviewMode = true
-                        useWideViewPort = true
-                    }
-                    binding.wvContent.loadData(
-                        "<html><body style='margin:0;background:#0D0B1E'>" +
-                        "<embed src='data:application/pdf;base64,$base64Str' " +
-                        "width='100%' height='100%' type='application/pdf'/>" +
-                        "</body></html>",
-                        "text/html", "base64"
-                    )
-                    binding.wvContent.visibility = View.VISIBLE
+                    renderPdf(bytes)
                 }
-                else -> showUnsupported()
+                else -> withContext(Dispatchers.Main) { showUnsupported() }
             }
         } catch (e: Exception) {
-            showUnsupported()
+            withContext(Dispatchers.Main) { showUnsupported() }
+        }
+    }
+
+    private suspend fun renderPdf(bytes: ByteArray) {
+        withContext(Dispatchers.IO) {
+            try {
+                // Write bytes to temp file
+                val tmpFile = File(requireContext().cacheDir, "viewer_${System.currentTimeMillis()}.pdf")
+                tmpFile.writeBytes(bytes)
+                pdfFile = tmpFile
+
+                val pfd = ParcelFileDescriptor.open(tmpFile, ParcelFileDescriptor.MODE_READ_ONLY)
+                val renderer = PdfRenderer(pfd)
+                pdfRenderer = renderer
+                totalPages = renderer.pageCount
+
+                withContext(Dispatchers.Main) {
+                    binding.wvContent.visibility = View.GONE
+                    binding.tvContent.visibility = View.GONE
+                    binding.ivContent.visibility = View.GONE
+                    binding.llUnsupported.visibility = View.GONE
+                    updatePageInfo()
+                    renderCurrentPage()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { showUnsupported() }
+            }
+        }
+    }
+
+    private fun renderCurrentPage() {
+        val renderer = pdfRenderer ?: return
+        updatePageInfo()
+        try {
+            val page = renderer.openPage(currentPage - 1)
+            // Render at 2x density for sharpness
+            val scale = resources.displayMetrics.density * 2f
+            val width = (page.width * scale).toInt()
+            val height = (page.height * scale).toInt()
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            canvas.drawColor(Color.WHITE)
+            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+            page.close()
+
+            // Show in a full-width ImageView inside the scroll container
+            binding.ivContent.setImageBitmap(bitmap)
+            binding.ivContent.visibility = View.VISIBLE
+            binding.ivContent.scaleType = ImageView.ScaleType.FIT_CENTER
+            binding.ivContent.adjustViewBounds = true
+        } catch (e: Exception) {
+            Toast.makeText(requireContext(), "Failed to render page: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
     private fun showUnsupported() {
         binding.tvUnsupportedName.text = fileName
         binding.llUnsupported.visibility = View.VISIBLE
+        binding.ivContent.visibility = View.GONE
+        binding.tvContent.visibility = View.GONE
+        binding.wvContent.visibility = View.GONE
     }
 
     private fun updatePageInfo() {
-        binding.tvPageInfo.text = "Page $currentPage"
+        binding.tvPageInfo.text = "Page $currentPage / $totalPages"
     }
 
     private fun downloadFile() {
@@ -210,6 +256,8 @@ class FileViewerFragment : Fragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
+        pdfRenderer?.close()
+        pdfFile?.delete()
         _binding = null
     }
 }

@@ -83,13 +83,17 @@ class ShareFragment : Fragment() {
                 val mainAct = activity as? MainActivity ?: return@DeviceTileAdapter
                 val username = mainAct.webSocketManager.sessionDevices.value
                     .firstOrNull { it.id == device.id }?.name ?: device.name
+                // Save as pending_sent locally
                 val friend = com.flowlink.app.model.Friend(
                     username = username,
                     deviceName = device.name,
-                    deviceId = device.id
+                    deviceId = device.id,
+                    status = "pending_sent"
                 )
-                FriendsFragment.saveFriend(requireContext(), friend)
-                android.widget.Toast.makeText(requireContext(), "Added $username to friends!", android.widget.Toast.LENGTH_SHORT).show()
+                FriendsFragment.savePendingSent(requireContext(), friend)
+                // Send request via WebSocket
+                mainAct.webSocketManager.sendFriendRequest(username)
+                android.widget.Toast.makeText(requireContext(), "Friend request sent to $username", android.widget.Toast.LENGTH_SHORT).show()
             },
             transferStatuses = transferStatuses
         )

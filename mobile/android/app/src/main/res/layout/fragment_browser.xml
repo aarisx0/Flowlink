@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/bg_gradient">
+
+    <!-- Address Bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@drawable/glass_card_bg_dark"
+        android:paddingHorizontal="10dp"
+        android:paddingVertical="8dp">
+
+        <!-- Back -->
+        <ImageButton
+            android:id="@+id/btn_browser_back"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="@android:color/transparent"
+            android:src="@android:drawable/ic_menu_revert"
+            android:tint="#B8B5D4"
+            android:contentDescription="Back" />
+
+        <!-- Forward -->
+        <ImageButton
+            android:id="@+id/btn_browser_forward"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="@android:color/transparent"
+            android:src="@android:drawable/ic_media_next"
+            android:tint="#B8B5D4"
+            android:contentDescription="Forward" />
+
+        <!-- URL bar -->
+        <EditText
+            android:id="@+id/et_url"
+            android:layout_width="0dp"
+            android:layout_height="38dp"
+            android:layout_weight="1"
+            android:background="@drawable/input_glass_bg"
+            android:hint="Search or enter URL…"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#6B6890"
+            android:textSize="13sp"
+            android:paddingHorizontal="12dp"
+            android:singleLine="true"
+            android:imeOptions="actionGo"
+            android:inputType="textUri"
+            android:layout_marginHorizontal="6dp" />
+
+        <!-- Reload -->
+        <ImageButton
+            android:id="@+id/btn_browser_reload"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="@android:color/transparent"
+            android:src="@android:drawable/ic_menu_rotate"
+            android:tint="#B8B5D4"
+            android:contentDescription="Reload" />
+
+        <!-- Sync toggle -->
+        <ImageButton
+            android:id="@+id/btn_sync_toggle"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="@drawable/glass_card_bg_dark"
+            android:src="@android:drawable/ic_menu_share"
+            android:tint="#22C55E"
+            android:padding="6dp"
+            android:contentDescription="Sync with session" />
+    </LinearLayout>
+
+    <!-- Sync status bar -->
+    <TextView
+        android:id="@+id/tv_sync_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="● Syncing with session"
+        android:textColor="#22C55E"
+        android:textSize="11sp"
+        android:gravity="center"
+        android:paddingVertical="4dp"
+        android:background="#1A22C55E"
+        android:visibility="visible" />
+
+    <!-- WebView -->
+    <WebView
+        android:id="@+id/web_view"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <!-- Loading bar -->
+    <ProgressBar
+        android:id="@+id/progress_bar"
+        style="@android:style/Widget.ProgressBar.Horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="4dp"
+        android:progressDrawable="@drawable/progress_bar_track"
+        android:max="100"
+        android:progress="0"
+        android:visibility="gone" />
+
+</LinearLayout>

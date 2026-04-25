@@ -210,6 +210,50 @@ wss.on('connection', (ws, req) => {
         case 'group_delete':
           handleGroupDelete(ws, message);
           break;
+
+        case 'browser_sync':
+          // Broadcast to all other devices in session
+          if (message.sessionId) {
+            broadcastToSession(message.sessionId, { ...message, timestamp: Date.now() }, message.deviceId);
+          }
+          break;
+
+        case 'sos_alert': {
+          // Route to specific target device OR broadcast to session
+          const targetDeviceId = message.payload?.targetDeviceId;
+          if (targetDeviceId) {
+            const tw = deviceConnections.get(targetDeviceId);
+            if (tw && tw.readyState === tw.OPEN) {
+              tw.send(JSON.stringify({ ...message, timestamp: Date.now() }));
+            }
+          } else if (message.sessionId) {
+            broadcastToSession(message.sessionId, { ...message, timestamp: Date.now() }, message.deviceId);
+          }
+          break;
+        }
+
+        case 'friend_request':
+        case 'friend_request_response': {
+          // Route directly to target device via global registry (works outside session)
+          const targetUsername = message.payload?.toUsername;
+          const targetDeviceId = message.payload?.toDeviceId;
+          let targetWs = null;
+          if (targetDeviceId) {
+            targetWs = deviceConnections.get(targetDeviceId);
+          } else if (targetUsername) {
+            // Find device by username in global registry
+            for (const [, entry] of globalDevices.entries()) {
+              if (entry.device?.username === targetUsername) {
+                targetWs = deviceConnections.get(entry.device.id);
+                break;
+              }
+            }
+          }
+          if (targetWs && targetWs.readyState === targetWs.OPEN) {
+            targetWs.send(JSON.stringify({ ...message, timestamp: Date.now() }));
+          }
+          break;
+        }
           
         case 'session_invitation':
           console.log('📨 Received session_invitation:', message);
