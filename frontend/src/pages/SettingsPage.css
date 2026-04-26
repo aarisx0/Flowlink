@@ -1,0 +1,138 @@
+/* ===== Settings Page ===== */
+.settings-page { display: flex; flex-direction: column; gap: 1.25rem; animation: fadeInUp 0.3s ease; }
+
+/* Profile bar */
+.settings-profile { display: flex; align-items: center; gap: 1rem; padding: 1.1rem 1.5rem; }
+.sp-avatar { width: 52px; height: 52px; border-radius: 50%; background: linear-gradient(135deg, var(--brand), var(--brand-violet)); display: flex; align-items: center; justify-content: center; font-size: 1.3rem; font-weight: 800; color: #fff; flex-shrink: 0; }
+.sp-info { flex: 1; }
+.sp-name { font-size: 1rem; font-weight: 800; color: var(--text); }
+.sp-sub { font-size: 0.72rem; color: var(--text-3); margin-top: 2px; }
+
+/* SOS button */
+.sos-btn {
+  padding: 0.55rem 1.1rem; border-radius: 10px;
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+  color: #fff; border: none; font-size: 0.85rem; font-weight: 800;
+  cursor: pointer; transition: all 0.2s;
+  box-shadow: 0 3px 12px rgba(220,38,38,0.4);
+  white-space: nowrap;
+}
+.sos-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(220,38,38,0.5); }
+.sos-btn.sending { background: linear-gradient(135deg, #f59e0b, #d97706); box-shadow: 0 3px 12px rgba(245,158,11,0.4); animation: sos-pulse 0.6s ease-in-out infinite alternate; }
+.sos-btn:disabled { cursor: not-allowed; }
+@keyframes sos-pulse { from { transform: scale(1); } to { transform: scale(1.04); } }
+
+/* Layout */
+.settings-layout { display: grid; grid-template-columns: 210px 1fr; gap: 1.25rem; align-items: start; }
+
+/* Sidebar tabs */
+.settings-tabs { display: flex; flex-direction: column; gap: 2px; background: rgba(255,255,255,0.82); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.5rem; backdrop-filter: blur(14px); }
+.settings-tab { display: flex; align-items: center; gap: 0.55rem; padding: 0.6rem 0.85rem; border-radius: var(--radius-sm); border: none; background: transparent; color: var(--text-2); font-size: 0.82rem; font-weight: 500; cursor: pointer; transition: all 0.18s; text-align: left; position: relative; }
+.settings-tab:hover { background: rgba(108,99,255,0.07); color: var(--brand); }
+.settings-tab.active { background: rgba(108,99,255,0.12); color: var(--brand); font-weight: 700; }
+.st-label { flex: 1; }
+.st-badge { background: var(--red); color: #fff; font-size: 0.6rem; font-weight: 800; border-radius: 999px; min-width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; padding: 0 3px; }
+
+/* Content */
+.settings-content { padding: 1.5rem; }
+.settings-section { display: flex; flex-direction: column; gap: 0; }
+.ss-title { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-3); margin-bottom: 1.1rem; }
+.ss-empty { color: var(--text-3); font-size: 0.82rem; padding: 1.5rem 0; text-align: center; }
+.ss-inbox-hint { font-size: 0.78rem; color: var(--text-3); background: rgba(108,99,255,0.06); border: 1px solid rgba(108,99,255,0.15); border-radius: 8px; padding: 0.75rem 1rem; margin-top: 0.5rem; }
+
+.ss-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.85rem 0; border-bottom: 1px solid var(--border); }
+.ss-toggle-row:last-child { border-bottom: none; }
+.ss-label { font-size: 0.85rem; font-weight: 600; color: var(--text); }
+.ss-desc { font-size: 0.72rem; color: var(--text-3); margin-top: 2px; }
+
+.ss-row-info { display: flex; justify-content: space-between; align-items: center; padding: 0.7rem 0; border-bottom: 1px solid var(--border); font-size: 0.82rem; }
+.ss-row-info:last-child { border-bottom: none; }
+.ss-row-info span:first-child { color: var(--text-2); font-weight: 600; }
+.ss-row-info span:last-child, .ss-row-info strong, .ss-row-info code { color: var(--text-3); font-size: 0.8rem; }
+.ss-row-info code { background: rgba(148,163,184,0.12); padding: 2px 6px; border-radius: 4px; font-family: monospace; }
+
+.ss-color-input { width: 44px; height: 32px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; padding: 2px; background: transparent; }
+.ss-select { padding: 0.45rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,0.8); color: var(--text); font-size: 0.82rem; outline: none; cursor: pointer; }
+.ss-select:focus { border-color: var(--brand); }
+
+/* ── Inbox ── */
+.inbox-section { margin-bottom: 1.25rem; }
+.inbox-section-label { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-3); margin-bottom: 0.65rem; }
+
+/* SOS alert card */
+.inbox-sos-card {
+  background: linear-gradient(135deg, rgba(220,38,38,0.08), rgba(185,28,28,0.05));
+  border: 1px solid rgba(220,38,38,0.3); border-radius: 12px;
+  padding: 0.9rem 1rem; margin-bottom: 0.65rem;
+  animation: sos-flash 1s ease-in-out 3;
+}
+@keyframes sos-flash { 0%,100% { border-color: rgba(220,38,38,0.3); } 50% { border-color: rgba(220,38,38,0.8); box-shadow: 0 0 12px rgba(220,38,38,0.3); } }
+.sos-card-header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; }
+.sos-icon { font-size: 1.5rem; flex-shrink: 0; }
+.sos-from { font-size: 0.88rem; font-weight: 700; color: var(--red); }
+.sos-time { font-size: 0.68rem; color: var(--text-3); margin-top: 1px; }
+.inbox-dismiss { margin-left: auto; border: none; background: transparent; color: var(--text-3); cursor: pointer; font-size: 0.9rem; padding: 0.2rem; }
+.sos-location-link { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; color: #2563eb; text-decoration: none; font-weight: 600; }
+.sos-location-link:hover { text-decoration: underline; }
+.sos-no-location { font-size: 0.75rem; color: var(--text-3); }
+
+/* Friend request card */
+.inbox-request-card {
+  display: flex; align-items: center; gap: 0.85rem;
+  padding: 0.85rem 1rem; border-radius: 12px;
+  background: rgba(248,250,252,0.9); border: 1px solid var(--border);
+  margin-bottom: 0.55rem; transition: all 0.18s;
+}
+.inbox-request-card:hover { background: rgba(255,255,255,0.98); border-color: var(--border-strong); }
+.irc-avatar { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, var(--brand), var(--brand-violet)); display: flex; align-items: center; justify-content: center; font-size: 0.85rem; font-weight: 800; color: #fff; flex-shrink: 0; }
+.irc-avatar.small { width: 26px; height: 26px; font-size: 0.65rem; }
+.irc-info { flex: 1; }
+.irc-name { font-size: 0.88rem; font-weight: 700; color: var(--text); }
+.irc-time { font-size: 0.68rem; color: var(--text-3); margin-top: 1px; }
+.irc-actions { display: flex; gap: 0.45rem; }
+.irc-btn { font-size: 0.75rem !important; padding: 0.38rem 0.75rem !important; }
+
+/* History row */
+.inbox-history-row { display: flex; align-items: center; gap: 0.65rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border); }
+.inbox-history-row:last-child { border-bottom: none; }
+.irc-status { margin-left: auto; font-size: 0.72rem; font-weight: 600; }
+.irc-status.accepted { color: #16a34a; }
+.irc-status.rejected { color: var(--red); }
+
+/* ── Friends list ── */
+.friends-list { display: flex; flex-direction: column; gap: 0.65rem; margin-bottom: 1.25rem; }
+.friend-card {
+  display: flex; align-items: center; gap: 0.85rem;
+  padding: 0.85rem 1rem; border-radius: 12px;
+  background: rgba(248,250,252,0.9); border: 1px solid var(--border);
+  transition: all 0.18s;
+}
+.friend-card:hover { background: rgba(255,255,255,0.98); border-color: var(--border-strong); }
+.friend-avatar { width: 38px; height: 38px; border-radius: 50%; background: linear-gradient(135deg, var(--brand), var(--brand-violet)); display: flex; align-items: center; justify-content: center; font-size: 0.9rem; font-weight: 800; color: #fff; flex-shrink: 0; }
+.friend-info { flex: 1; }
+.friend-name { font-size: 0.9rem; font-weight: 700; color: var(--text); }
+.friend-since { font-size: 0.68rem; color: var(--text-3); margin-top: 1px; }
+.friend-actions { display: flex; gap: 0.45rem; }
+.friend-invite-btn { font-size: 0.75rem !important; padding: 0.38rem 0.75rem !important; }
+.friend-remove-btn { font-size: 0.75rem !important; padding: 0.38rem 0.65rem !important; }
+
+.friends-sos-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 0; border-top: 1px solid var(--border); margin-top: 0.5rem; }
+
+/* About */
+.ss-about-logo { font-size: 3rem; text-align: center; margin-bottom: 0.5rem; }
+.ss-about-name { font-size: 1.4rem; font-weight: 800; color: var(--text); text-align: center; margin-bottom: 0.25rem; }
+.ss-about-tagline { font-size: 0.8rem; color: var(--text-3); text-align: center; margin-bottom: 1.5rem; }
+
+/* Toggle */
+.toggle { position: relative; display: inline-block; width: 40px; height: 22px; }
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle-slider { position: absolute; inset: 0; background: rgba(148,163,184,0.4); border-radius: 999px; cursor: pointer; transition: 0.2s; }
+.toggle-slider::before { content: ''; position: absolute; width: 16px; height: 16px; left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: 0.2s; box-shadow: 0 1px 4px rgba(0,0,0,0.2); }
+.toggle input:checked + .toggle-slider { background: var(--brand); }
+.toggle input:checked + .toggle-slider::before { transform: translateX(18px); }
+
+@media (max-width: 768px) {
+  .settings-layout { grid-template-columns: 1fr; }
+  .settings-tabs { flex-direction: row; flex-wrap: wrap; }
+  .st-label { display: none; }
+}

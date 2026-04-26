@@ -1,0 +1,23 @@
+/* ===== Groups Page ===== */
+.groups-page { display: flex; flex-direction: column; gap: 1.25rem; animation: fadeInUp 0.3s ease; }
+.groups-no-session, .groups-empty { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; padding: 3rem; text-align: center; color: var(--text-3); font-size: 0.85rem; }
+.groups-no-session > div:first-child, .groups-empty > div:first-child { font-size: 2.5rem; opacity: 0.4; }
+.create-group-card { padding: 1.4rem; }
+.cgc-title { font-size: 0.95rem; font-weight: 800; color: var(--text); margin-bottom: 1rem; }
+.cgc-body { display: flex; flex-direction: column; gap: 0.85rem; }
+.cgc-input { padding: 0.6rem 0.85rem; border: 1px solid var(--border); border-radius: 10px; background: rgba(255,255,255,0.8); font-size: 0.88rem; color: var(--text); outline: none; transition: all 0.2s; }
+.cgc-input:focus { border-color: var(--brand); box-shadow: 0 0 0 2px rgba(108,99,255,0.1); }
+.cgc-devices { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.cgc-empty { font-size: 0.78rem; color: var(--text-3); }
+.cgc-device-check { display: flex; align-items: center; gap: 0.4rem; padding: 0.45rem 0.75rem; border-radius: 8px; border: 1px solid var(--border); cursor: pointer; font-size: 0.8rem; color: var(--text-2); transition: all 0.18s; }
+.cgc-device-check input { display: none; }
+.cgc-device-check.selected { background: rgba(108,99,255,0.1); border-color: var(--border-strong); color: var(--brand); font-weight: 600; }
+.groups-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem; }
+.group-card { padding: 1.25rem; display: flex; flex-direction: column; gap: 0.6rem; transition: all 0.2s; }
+.group-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.gc-color { width: 36px; height: 6px; border-radius: 999px; }
+.gc-name { font-size: 1rem; font-weight: 800; color: var(--text); }
+.gc-count { font-size: 0.72rem; color: var(--text-3); }
+.gc-devices { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.gc-device-chip { font-size: 0.7rem; padding: 2px 8px; border-radius: 999px; background: rgba(108,99,255,0.1); color: var(--brand); }
+.gc-delete-btn { font-size: 0.75rem !important; padding: 0.35rem 0.7rem !important; margin-top: auto; width: fit-content; }

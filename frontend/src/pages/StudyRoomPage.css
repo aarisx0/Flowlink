@@ -1,0 +1,153 @@
+/* ===== Study Room Page — Full Page Glossy ===== */
+.study-room-page {
+  position: fixed; inset: 0; left: var(--sidebar-w);
+  display: flex; flex-direction: column;
+  background: radial-gradient(ellipse at 20% 10%, rgba(30,64,175,0.15), transparent 60%),
+              radial-gradient(ellipse at 80% 90%, rgba(124,58,237,0.12), transparent 60%),
+              linear-gradient(160deg, #0f172a 0%, #1e293b 100%);
+  z-index: 50;
+  /* Offset for the top header */
+  top: var(--header-h);
+}
+
+/* Toolbar */
+.srp-toolbar {
+  height: 56px; flex-shrink: 0;
+  display: flex; align-items: center; gap: 0.85rem;
+  padding: 0 1.25rem;
+  background: rgba(15,23,42,0.85);
+  border-bottom: 1px solid rgba(148,163,184,0.15);
+  backdrop-filter: blur(16px);
+}
+
+.srp-back-btn {
+  border: 1px solid rgba(148,163,184,0.25); border-radius: 8px;
+  background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.75);
+  padding: 0.35rem 0.75rem; font-size: 0.78rem; font-weight: 600;
+  cursor: pointer; transition: all 0.18s; white-space: nowrap;
+}
+.srp-back-btn:hover { background: rgba(255,255,255,0.14); color: #fff; }
+
+.srp-file-name {
+  flex: 1; font-size: 0.88rem; font-weight: 700; color: #e2e8f0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.srp-toolbar-controls {
+  display: flex; align-items: center; gap: 0.4rem;
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(148,163,184,0.18);
+  border-radius: 10px; padding: 0.3rem 0.6rem;
+}
+.srp-ctrl-btn {
+  border: none; background: transparent; color: rgba(255,255,255,0.8);
+  width: 28px; height: 28px; border-radius: 6px; cursor: pointer;
+  font-size: 1rem; display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.srp-ctrl-btn:hover:not(:disabled) { background: rgba(255,255,255,0.12); color: #fff; }
+.srp-ctrl-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.srp-page-info, .srp-zoom-info { font-size: 0.78rem; color: rgba(255,255,255,0.7); min-width: 52px; text-align: center; }
+.srp-divider { width: 1px; height: 20px; background: rgba(148,163,184,0.2); margin: 0 0.2rem; }
+
+.srp-participants { display: flex; align-items: center; gap: 0.3rem; }
+.srp-participant-dot {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--brand), var(--brand-violet));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.7rem; font-weight: 800; color: #fff;
+  border: 2px solid rgba(255,255,255,0.2);
+}
+.srp-alone { font-size: 0.72rem; color: rgba(255,255,255,0.4); }
+
+/* Body */
+.srp-body { flex: 1; display: flex; overflow: hidden; }
+
+/* Sidebar */
+.srp-sidebar {
+  width: 240px; flex-shrink: 0;
+  background: rgba(15,23,42,0.7);
+  border-right: 1px solid rgba(148,163,184,0.12);
+  padding: 1rem; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 0.4rem;
+}
+.srp-sidebar-title {
+  font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.1em; color: rgba(148,163,184,0.7); margin-bottom: 0.35rem;
+}
+.srp-sidebar-empty { font-size: 0.78rem; color: rgba(148,163,184,0.5); text-align: center; padding: 1rem 0; }
+
+.srp-sidebar-file {
+  display: flex; align-items: center; gap: 0.65rem;
+  padding: 0.65rem 0.75rem; border-radius: 10px;
+  cursor: pointer; transition: all 0.18s;
+  border: 1px solid transparent;
+}
+.srp-sidebar-file:hover { background: rgba(255,255,255,0.07); }
+.srp-sidebar-file.active { background: rgba(108,99,255,0.18); border-color: rgba(108,99,255,0.35); }
+.srp-sf-icon { font-size: 1.2rem; flex-shrink: 0; }
+.srp-sf-info { flex: 1; overflow: hidden; }
+.srp-sf-name { font-size: 0.78rem; font-weight: 600; color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.srp-sf-size { font-size: 0.65rem; color: rgba(148,163,184,0.6); margin-top: 1px; }
+
+.srp-anchor-list { display: flex; flex-direction: column; gap: 0.3rem; }
+.srp-anchor-btn {
+  border: none; background: rgba(59,130,246,0.12); color: #93c5fd;
+  border-radius: 7px; padding: 0.35rem 0.6rem; font-size: 0.72rem;
+  cursor: pointer; text-align: left; transition: all 0.15s;
+}
+.srp-anchor-btn:hover { background: rgba(59,130,246,0.22); }
+.srp-anchor-btn span { font-weight: 700; margin-right: 0.35rem; }
+
+.srp-note-input {
+  width: 100%; min-height: 72px; resize: vertical;
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(148,163,184,0.2);
+  border-radius: 8px; color: #e2e8f0; padding: 0.55rem 0.7rem;
+  font-size: 0.78rem; font-family: inherit; outline: none; transition: all 0.2s;
+}
+.srp-note-input:focus { border-color: rgba(108,99,255,0.5); background: rgba(255,255,255,0.09); }
+.srp-note-input::placeholder { color: rgba(148,163,184,0.4); }
+
+/* Viewer */
+.srp-viewer {
+  flex: 1; overflow: hidden; display: flex; align-items: center; justify-content: center;
+  position: relative;
+}
+
+.srp-no-session, .srp-no-file {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 0.85rem; color: rgba(148,163,184,0.7); font-size: 0.9rem; text-align: center;
+  padding: 2rem;
+}
+.srp-no-session > div:first-child, .srp-no-file > div:first-child { font-size: 3rem; opacity: 0.4; }
+.srp-nf-sub { font-size: 0.75rem; color: rgba(148,163,184,0.5); }
+
+.srp-pdf-scroll {
+  position: absolute; inset: 0;
+  overflow-y: auto; overflow-x: auto;
+  padding: 1.25rem;
+  background: transparent;
+}
+
+/* PDF Pages */
+.srp-page-wrapper {
+  position: relative; margin: 0 auto 1.25rem;
+  border-radius: 8px; overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06);
+  display: block; width: fit-content;
+}
+.srp-page-wrapper canvas { display: block; }
+.srp-text-layer {
+  position: absolute; top: 0; left: 0;
+  pointer-events: none; user-select: text;
+}
+.srp-anchor {
+  position: absolute; transform: translate(-50%, -50%);
+  background: rgba(250,204,21,0.3); border: 1.5px solid rgba(250,204,21,0.8);
+  border-radius: 3px; pointer-events: none;
+  box-shadow: 0 0 8px rgba(250,204,21,0.3);
+}
+
+@media (max-width: 768px) {
+  .study-room-page { left: 0; }
+  .srp-sidebar { width: 200px; }
+}

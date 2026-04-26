@@ -1,384 +1,289 @@
-import { useState, useEffect, useRef } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import SessionManager from './components/SessionManager';
-import DeviceTiles from './components/DeviceTiles';
-import RemoteAccess from './components/RemoteAccess';
-import DownloadPage from './components/DownloadPage';
-import UsernameModal from './components/UsernameModal';
+﻿import { useState, useEffect, useRef } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { Session } from '@shared/types';
 import { generateDeviceId } from '@shared/utils';
 import InvitationService from './services/InvitationService';
+import { friendService } from './services/FriendService';
 import { SIGNALING_WS_URL } from './config/signaling';
+import OverviewPage from './pages/OverviewPage';
+import MyDevicesPage from './pages/MyDevicesPage';
+import GroupsPage from './pages/GroupsPage';
+import MessagesPage from './pages/MessagesPage';
+import FilesPage from './pages/FilesPage';
+import ActivityPage from './pages/ActivityPage';
+import SettingsPage from './pages/SettingsPage';
+import StudyPage from './pages/StudyPage';
+import StudyRoomPage from './pages/StudyRoomPage';
+import RemoteAccess from './components/RemoteAccess';
+import DownloadPage from './components/DownloadPage';
+import UsernameModal from './components/UsernameModal';
 import './App.css';
 
-function App() {
+export interface AppContext {
+  session: Session | null;
+  deviceId: string;
+  deviceName: string;
+  username: string;
+  invitationService: InvitationService | null;
+  onSessionCreated: (s: Session) => void;
+  onSessionJoined: (s: Session) => void;
+  onLeaveSession: () => void;
+}
+function Shell() {
   const [session, setSession] = useState<Session | null>(null);
   const [deviceId] = useState(() => generateDeviceId());
-  const [deviceName] = useState(() => {
-    // Try to get device name from browser
-    return (navigator as any).userAgentData?.platform || 'Laptop';
-  });
-  const [username, setUsername] = useState<string | null>(() => {
-    return localStorage.getItem('flowlink_username');
-  });
+  const [deviceName] = useState(() => (navigator as any).userAgentData?.platform || 'Laptop');
+  const [username, setUsername] = useState<string | null>(() => localStorage.getItem('flowlink_username'));
   const [invitationService, setInvitationService] = useState<InvitationService | null>(null);
+  const [chatUnread, setChatUnread] = useState(0);
+  const [inboxUnread, setInboxUnread] = useState(() => friendService.getInbox().filter(r => r.status === 'pending').length);
   const invitationServiceRef = useRef<InvitationService | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const location = useLocation();
+  const navigate = useNavigate();
 
-  // Connect to WebSocket for persistent invitation listening
   const connectWebSocket = () => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      return wsRef.current;
-    }
-
+    if (wsRef.current?.readyState === WebSocket.OPEN) return wsRef.current;
     const ws = new WebSocket(SIGNALING_WS_URL);
-    
     ws.onopen = () => {
-      console.log('App-level WebSocket connected for invitations');
-      
-      // Register device for invitation listening
-      ws.send(JSON.stringify({
-        type: 'device_register',
-        payload: {
-          deviceId,
-          deviceName,
-          deviceType: 'laptop',
-          username,
-        },
-        timestamp: Date.now(),
-      }));
-      
-      // Store WebSocket reference for components to access
+      ws.send(JSON.stringify({ type: 'device_register', payload: { deviceId, deviceName, deviceType: 'laptop', username }, timestamp: Date.now() }));
       wsRef.current = ws;
-      
-      // Make WebSocket globally accessible for components
       (window as any).appWebSocket = ws;
-      
-      // Set WebSocket for invitation service when it's ready
-      if (invitationServiceRef.current) {
-        invitationServiceRef.current.setWebSocket(ws);
-        console.log('WebSocket set on InvitationService');
-      } else {
-        console.warn('InvitationService not ready when WebSocket connected');
-      }
+      if (invitationServiceRef.current) invitationServiceRef.current.setWebSocket(ws);
     };
-    
-    ws.onmessage = (event) => {
-      const message = JSON.parse(event.data);
-      handleWebSocketMessage(message);
-    };
-    
-    ws.onclose = () => {
-      console.log('App-level WebSocket disconnected');
-      wsRef.current = null;
-      (window as any).appWebSocket = null;
-      // Reconnect after a delay
-      setTimeout(connectWebSocket, 2000);
-    };
-    
-    ws.onerror = (error) => {
-      console.error('App-level WebSocket error:', error);
-    };
-    
+    ws.onmessage = (e) => handleWebSocketMessage(JSON.parse(e.data));
+    ws.onclose = () => { wsRef.current = null; (window as any).appWebSocket = null; setTimeout(connectWebSocket, 2000); };
+    ws.onerror = () => {};
     wsRef.current = ws;
     return ws;
   };
 
-  // Handle WebSocket messages at App level
   const handleWebSocketMessage = (message: any) => {
     switch (message.type) {
-      case 'device_registered':
-        console.log('Device registered for invitation listening:', message.payload);
-        break;
-        
       case 'session_created':
       case 'session_joined':
-        // Forward session messages to SessionManager via custom event
-        const sessionEvent = new CustomEvent('sessionMessage', {
-          detail: { message }
-        });
-        window.dispatchEvent(sessionEvent);
+        window.dispatchEvent(new CustomEvent('sessionMessage', { detail: { message } }));
         break;
       case 'chat_message':
       case 'chat_delivered':
       case 'chat_seen':
-      case 'chat_typing': {
-        const chatEvent = new CustomEvent('chatMessage', {
-          detail: { message }
-        });
-        window.dispatchEvent(chatEvent);
+      case 'chat_typing':
+        window.dispatchEvent(new CustomEvent('chatMessage', { detail: { message } }));
+        if (message.type === 'chat_message') setChatUnread(p => p + 1);
+        break;
+      case 'session_invitation':
+        if (invitationServiceRef.current) {
+          const inv = message.payload.invitation;
+          invitationServiceRef.current.handleIncomingInvitation(inv);
+          invitationServiceRef.current.storeInvitationData(inv.sessionId, inv.sessionCode);
+        }
+        break;
+      case 'nearby_session_broadcast':
+        if (invitationServiceRef.current) {
+          const ns = message.payload.nearbySession;
+          invitationServiceRef.current.handleNearbySession(ns);
+          invitationServiceRef.current.storeInvitationData(ns.sessionId, ns.sessionCode);
+        }
+        break;
+      case 'invitation_response':
+        if (invitationServiceRef.current) {
+          const r = message.payload;
+          invitationServiceRef.current.notificationService.showToast({
+            type: r.accepted ? 'success' : 'info',
+            title: r.accepted ? 'Invitation Accepted' : 'Invitation Declined',
+            message: `${r.inviteeUsername} ${r.accepted ? 'accepted' : 'declined'} your invitation`,
+            duration: 3500,
+          });
+        }
+        break;
+      case 'invitation_sent':
+        if (invitationServiceRef.current) {
+          invitationServiceRef.current.notificationService.showToast({
+            type: 'success', title: 'Invitation Sent',
+            message: `Sent to ${message.payload.targetUsername || message.payload.targetIdentifier}`,
+            duration: 3000,
+          });
+        }
+        break;
+      case 'media_handoff_offer':
+        if (invitationServiceRef.current) {
+          const m = message.payload;
+          const ts = m.timestamp || 0;
+          const tsText = ts > 0 ? ` at ${Math.floor(ts / 60)}:${(ts % 60).toString().padStart(2, '0')}` : '';
+          let url = m.url;
+          if (ts > 0 && m.url?.includes('youtube.com')) url += `${m.url.includes('?') ? '&' : '?'}t=${Math.floor(ts)}`;
+          invitationServiceRef.current.notificationService.showToast({
+            type: 'info', title: `Continue on ${m.platform || 'this device'}?`,
+            message: `${m.title}${tsText}`, duration: 10000,
+            actions: [{ id: 'open', label: 'Open', action: 'accept' as const }, { id: 'dismiss', label: 'Dismiss', action: 'dismiss' as const }],
+            onAction: (id: string) => { if (id === 'open') window.open(url, '_blank'); },
+          });
+        }
+        break;
+      case 'clipboard_sync': {
+        const txt = message.payload?.clipboard?.text || message.payload?.clipboard?.url;
+        if (txt) navigator.clipboard.writeText(txt).catch(() => {});
         break;
       }
-        
-      case 'session_invitation':
-        // Handle incoming session invitation
-        console.log('📨 App.tsx received session_invitation:', message);
-        const invitation = message.payload.invitation;
-        console.log('  Invitation data:', invitation);
-        console.log('  InvitationService available:', !!invitationServiceRef.current);
-        
-        if (invitationServiceRef.current) {
-          console.log('  Calling handleIncomingInvitation...');
-          invitationServiceRef.current.handleIncomingInvitation(invitation);
-          // Store invitation data for potential acceptance
-          invitationServiceRef.current.storeInvitationData(invitation.sessionId, invitation.sessionCode);
-          console.log('  Invitation handled successfully');
-        } else {
-          console.error('  InvitationService not available!');
-        }
-        break;
-
-      case 'nearby_session_broadcast':
-        // Handle nearby session notification
-        console.log('📨 App.tsx received nearby_session_broadcast:', message);
-        const nearbySession = message.payload.nearbySession;
-        console.log('  Nearby session data:', nearbySession);
-        console.log('  InvitationService available:', !!invitationServiceRef.current);
-        
-        if (invitationServiceRef.current) {
-          console.log('  Calling handleNearbySession...');
-          invitationServiceRef.current.handleNearbySession(nearbySession);
-          // Store session data for potential joining
-          invitationServiceRef.current.storeInvitationData(nearbySession.sessionId, nearbySession.sessionCode);
-          console.log('  Nearby session handled successfully');
-        } else {
-          console.error('  InvitationService not available!');
-        }
-        break;
-
-      case 'invitation_response':
-        // Handle invitation response (accepted/rejected)
-        const response = message.payload;
-        if (invitationServiceRef.current) {
-          if (response.accepted) {
-            invitationServiceRef.current.notificationService.showToast({
-              type: 'success',
-              title: 'Invitation Accepted',
-              message: `${response.inviteeUsername} accepted your invitation`,
-              duration: 4000,
-            });
-          } else {
-            invitationServiceRef.current.notificationService.showToast({
-              type: 'info',
-              title: 'Invitation Declined',
-              message: `${response.inviteeUsername} declined your invitation`,
-              duration: 3000,
-            });
-          }
-        }
-        break;
-
-      case 'invitation_sent':
-        // Handle invitation sent confirmation
-        const sentResponse = message.payload;
-        if (invitationServiceRef.current) {
-          invitationServiceRef.current.notificationService.showToast({
-            type: 'success',
-            title: 'Invitation Sent',
-            message: `Invitation sent to ${sentResponse.targetUsername || sentResponse.targetIdentifier}`,
-            duration: 3000,
-          });
-        }
-        break;
-
-      case 'device_connected':
-        // Handle device connected notification (from extension or other devices)
-        console.log('📱 Device connected notification:', message.payload);
-        const connectedDevice = message.payload;
-        if (invitationServiceRef.current && connectedDevice.deviceName) {
-          invitationServiceRef.current.notificationService.showToast({
-            type: 'info',
-            title: 'Device Connected',
-            message: `${connectedDevice.deviceName} is now online`,
-            duration: 3000,
-          });
-        }
-        break;
-
-      case 'media_handoff_offer':
-        // Handle media handoff from extension or other devices
-        console.log('🎬 Media handoff offer:', message.payload);
-        const mediaOffer = message.payload;
-        if (invitationServiceRef.current && mediaOffer.title && mediaOffer.url) {
-          const timestamp = mediaOffer.timestamp || 0;
-          const timestampText = timestamp > 0 ? ` at ${Math.floor(timestamp / 60)}:${(timestamp % 60).toString().padStart(2, '0')}` : '';
-          
-          let finalUrl = mediaOffer.url;
-          // Add timestamp for YouTube videos
-          if (timestamp > 0 && mediaOffer.url.includes('youtube.com')) {
-            finalUrl += `${mediaOffer.url.includes('?') ? '&' : '?'}t=${Math.floor(timestamp)}`;
-          }
-          
-          invitationServiceRef.current.notificationService.showToast({
-            type: 'info',
-            title: `Continue watching on ${mediaOffer.platform || 'this device'}?`,
-            message: `${mediaOffer.title}${timestampText}`,
-            duration: 10000,
-            actions: [
-              { id: 'open', label: 'Open', action: 'accept' as const },
-              { id: 'dismiss', label: 'Dismiss', action: 'dismiss' as const }
-            ],
-            onAction: (actionId: string) => {
-              if (actionId === 'open') {
-                window.open(finalUrl, '_blank');
-              }
-            }
-          });
-        }
-        break;
-
-      case 'clipboard_sync':
-        // Handle clipboard sync from extension or other devices
-        console.log('📋 Clipboard sync:', message.payload);
-        const clipboardData = message.payload.clipboard;
-        const clipboardText = clipboardData?.text || clipboardData?.url;
-        if (clipboardText) {
-          // Copy to clipboard
-          navigator.clipboard.writeText(clipboardText).then(() => {
-            console.log('Clipboard synced:', clipboardText.substring(0, 50));
-            if (invitationServiceRef.current) {
-              invitationServiceRef.current.notificationService.showToast({
-                type: 'success',
-                title: 'Clipboard Synced',
-                message: clipboardText.substring(0, 100) + (clipboardText.length > 100 ? '...' : ''),
-                duration: 3000,
-              });
-            }
-          }).catch(err => {
-            console.error('Failed to write to clipboard:', err);
-          });
-        }
+      case 'friend_request':
+      case 'friend_request_response':
+      case 'sos_alert':
+        friendService.handleIncoming(message, username || '', deviceId);
+        if (message.type === 'friend_request') setInboxUnread(p => p + 1);
         break;
     }
   };
 
-  // Join session programmatically
   const joinSessionWithCode = (sessionCode: string) => {
-    console.log('App-level joining session:', sessionCode);
-    
-    // Clear current session first
     setSession(null);
-    
-    // Dispatch event to SessionManager to handle the join
-    const joinEvent = new CustomEvent('joinSessionFromInvitation', {
-      detail: { sessionCode }
-    });
-    window.dispatchEvent(joinEvent);
+    window.dispatchEvent(new CustomEvent('joinSessionFromInvitation', { detail: { sessionCode } }));
   };
 
-  // Initialize invitation service and connect WebSocket when username is available
   useEffect(() => {
     if (!username) return;
-
-    // Create InvitationService first if it doesn't exist
     if (!invitationServiceRef.current) {
-      console.log('Creating InvitationService for user:', username);
-      const service = new InvitationService(
-        deviceId,
-        username,
-        deviceName,
-        (sessionCode) => {
-          // Handle invitation acceptance by programmatically joining the session
-          console.log('Invitation accepted, joining session:', sessionCode);
-          joinSessionWithCode(sessionCode);
-        }
-      );
-      
-      // Set both ref and state
-      invitationServiceRef.current = service;
-      setInvitationService(service);
-      console.log('InvitationService created and stored in ref');
+      const svc = new InvitationService(deviceId, username, deviceName, (code) => joinSessionWithCode(code));
+      invitationServiceRef.current = svc;
+      setInvitationService(svc);
     }
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) connectWebSocket();
+    return () => { wsRef.current?.close(); };
+  }, [username]);
 
-    // Connect WebSocket after InvitationService is ready
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      console.log('Connecting WebSocket with InvitationService ready');
-      connectWebSocket();
-    }
-
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
-  }, [username, deviceId, deviceName]);
-
-  // Update InvitationService WebSocket when it changes
   useEffect(() => {
-    if (invitationServiceRef.current && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+    if (invitationServiceRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
       invitationServiceRef.current.setWebSocket(wsRef.current);
-      console.log('WebSocket updated on existing InvitationService');
     }
-  }, [invitationService, wsRef.current]);
+  }, [invitationService]);
 
-  const handleUsernameSubmit = (newUsername: string) => {
-    setUsername(newUsername);
+  useEffect(() => {
+    if (location.pathname === '/messages') setChatUnread(0);
+    if (location.pathname === '/settings') setInboxUnread(0);
+  }, [location.pathname]);
+
+  const ctx: AppContext = {
+    session, deviceId, deviceName, username: username || '',
+    invitationService,
+    onSessionCreated: setSession,
+    onSessionJoined: setSession,
+    onLeaveSession: () => setSession(null),
   };
 
-  return (
-    <BrowserRouter>
-      <div className="app">
-        <UsernameModal
-          isOpen={!username}
-          onSubmit={handleUsernameSubmit}
-          deviceName={deviceName}
-        />
+  const navItems: { to: string; icon: string; label: string; badge?: number }[] = [
+    { to: '/', icon: '🏠', label: 'Overview' },
+    { to: '/devices', icon: '📱', label: 'My Devices' },
+    { to: '/groups', icon: '👥', label: 'Groups' },
+    { to: '/messages', icon: '💬', label: 'Messages', badge: chatUnread },
+    { to: '/files', icon: '📁', label: 'Files' },
+    { to: '/activity', icon: '⚡', label: 'Activity' },
+    { to: '/study', icon: '📚', label: 'Study' },
+    { to: '/settings', icon: '⚙️', label: 'Settings', badge: inboxUnread },
+  ];
 
-        <header className="app-header">
-          <h1>FlowLink</h1>
-          <p>Cross-Device Continuity</p>
-          {username && (
-            <div className="user-info">
-              <span>Welcome, {username}</span>
-              {!session && <span className="session-lock-badge">🔒 No active session</span>}
-              {session && <span className="session-active-badge">🟢 Session {session.code}</span>}
+  const pageTitles: Record<string, { title: string; sub: string }> = {
+    '/': { title: `Welcome back, ${username || 'User'}! 👋`, sub: 'All your devices are in sync and ready to go.' },
+    '/devices': { title: 'My Devices', sub: 'Manage and control your connected devices.' },
+    '/groups': { title: 'Groups', sub: 'Organize devices into groups for broadcast.' },
+    '/messages': { title: 'Messages', sub: 'Chat with connected devices.' },
+    '/files': { title: 'Files', sub: 'Shared files across your session.' },
+    '/activity': { title: 'Activity', sub: 'Recent actions and events.' },
+    '/study': { title: 'Study', sub: 'Collaborative document viewer.' },
+    '/study/room': { title: 'Study Room', sub: 'Synchronized reading session.' },
+    '/settings': { title: 'Settings', sub: 'Preferences and configuration.' },
+  };
+  const pt = pageTitles[location.pathname] || { title: 'FlowLink', sub: '' };
+
+  return (
+    <div className="app-shell">
+      <UsernameModal
+        isOpen={!username}
+        onSubmit={(u) => { localStorage.setItem('flowlink_username', u); setUsername(u); }}
+        deviceName={deviceName}
+      />
+
+      <aside className="sidebar">
+        <div className="sidebar-brand">
+          <div className="sidebar-logo">⚡</div>
+          <div className="sidebar-brand-text">
+            <h1>FlowLink</h1>
+            <p>Cross-Device Continuity</p>
+          </div>
+        </div>
+
+        <nav className="sidebar-nav">
+          {navItems.map(item => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.to === '/'}
+              className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+            >
+              <span className="nav-icon">{item.icon}</span>
+              {item.label}
+              {item.badge ? <span className="nav-badge">{item.badge}</span> : null}
+            </NavLink>
+          ))}
+        </nav>
+
+        <div className="sidebar-footer">
+          <NavLink to="/settings" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
+            <span className="nav-icon">🎨</span> Theme
+          </NavLink>
+          <a href="https://github.com" target="_blank" rel="noreferrer" className="nav-item">
+            <span className="nav-icon">❓</span> Help & Support
+          </a>
+        </div>
+      </aside>
+
+      <div className="main-content">
+        <header className="top-header">
+          <div className="top-header-left">
+            <h2>{pt.title}</h2>
+            <p>{pt.sub}</p>
+          </div>
+          <div className="top-header-right">
+            <button className="header-notif-btn" title="Notifications">
+              🔔<span className="notif-dot" />
+            </button>
+            {session && (
+              <div className="session-badge-header" onClick={() => navigate('/')}>
+                <span className="dot" />
+                {session.code}
+              </div>
+            )}
+            <div className="header-user">
+              <div className="header-avatar">{(username || 'U')[0].toUpperCase()}</div>
+              <span className="header-user-name">{username || 'User'}</span>
+              <span className="header-user-caret">▾</span>
             </div>
-          )}
+          </div>
         </header>
 
-        <main className="app-main">
+        <main className="page-content">
           <Routes>
-            <Route
-              path="/download"
-              element={<DownloadPage />}
-            />
-            <Route
-              path="/remote/:deviceId"
-              element={<RemoteAccess />}
-            />
-            <Route
-              path="/"
-              element={
-                !session ? (
-                  <SessionManager
-                    deviceId={deviceId}
-                    deviceName={deviceName}
-                    deviceType="laptop"
-                    username={username || ''}
-                    invitationService={invitationService}
-                    onSessionCreated={setSession}
-                    onSessionJoined={setSession}
-                  />
-                ) : (
-                  <DeviceTiles
-                    session={session}
-                    deviceId={deviceId}
-                    deviceName={deviceName}
-                    deviceType="laptop"
-                    username={username || ''}
-                    invitationService={invitationService}
-                    onLeaveSession={() => setSession(null)}
-                  />
-                )
-              }
-            />
+            <Route path="/" element={<OverviewPage ctx={ctx} />} />
+            <Route path="/devices" element={<MyDevicesPage ctx={ctx} />} />
+            <Route path="/groups" element={<GroupsPage ctx={ctx} />} />
+            <Route path="/messages" element={<MessagesPage ctx={ctx} />} />
+            <Route path="/files" element={<FilesPage ctx={ctx} />} />
+            <Route path="/activity" element={<ActivityPage ctx={ctx} />} />
+            <Route path="/settings" element={<SettingsPage ctx={ctx} />} />
+            <Route path="/study" element={<StudyPage ctx={ctx} />} />
+            <Route path="/study/room" element={<StudyRoomPage ctx={ctx} />} />
+            <Route path="/download" element={<DownloadPage />} />
+            <Route path="/remote/:deviceId" element={<RemoteAccess />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
       </div>
-    </BrowserRouter>
+    </div>
   );
 }
 
-export default App;
-
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Shell />
+    </BrowserRouter>
+  );
+}

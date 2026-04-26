@@ -1,0 +1,283 @@
+﻿import { useState, useEffect, useRef, useCallback } from 'react';
+import { AppContext } from '../App';
+import './MessagesPage.css';
+
+interface Attachment { name: string; type: string; size: number; data: string; }
+interface ChatMsg {
+  messageId: string; text: string; username: string; sourceDevice: string;
+  sentAt: number; delivered: boolean; seen: boolean;
+  replyTo?: string; edited?: boolean;
+  attachment?: Attachment;
+}
+interface CtxMenu { msgId: string; x: number; y: number; own: boolean; }
+interface Props { ctx: AppContext; }
+
+export default function MessagesPage({ ctx }: Props) {
+  const { session, deviceId, username } = ctx;
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [input, setInput] = useState('');
+  const [typing, setTyping] = useState<Record<string, boolean>>({});
+  const [replyTo, setReplyTo] = useState<ChatMsg | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<CtxMenu | null>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const typingTimerRef = useRef<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const scrollToBottom = useCallback(() => {
+    setTimeout(() => bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: 'smooth' }), 50);
+  }, []);
+
+  useEffect(() => {
+    const ws = (window as any).appWebSocket as WebSocket | null;
+    if (!ws) return;
+
+    const handler = (e: MessageEvent) => {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'chat_message') {
+        const chat = msg.payload?.chat;
+        if (!chat?.messageId) return;
+        setMessages(p => {
+          if (p.find(m => m.messageId === chat.messageId)) return p;
+          return [...p, {
+            messageId: chat.messageId, text: chat.text || '', username: chat.username || 'Unknown',
+            sourceDevice: msg.payload?.sourceDevice || '', sentAt: chat.sentAt || Date.now(),
+            delivered: true, seen: true,
+            replyTo: chat.replyTo, edited: chat.edited,
+            attachment: chat.attachment,
+          }];
+        });
+        if (ws.readyState === WebSocket.OPEN && session) {
+          ws.send(JSON.stringify({ type: 'chat_seen', sessionId: session.id, deviceId, payload: { messageId: chat.messageId, targetDevice: msg.payload?.sourceDevice }, timestamp: Date.now() }));
+        }
+        scrollToBottom();
+      }
+      if (msg.type === 'chat_delivered') setMessages(p => p.map(m => m.messageId === msg.payload?.messageId ? { ...m, delivered: true } : m));
+      if (msg.type === 'chat_seen') setMessages(p => p.map(m => m.messageId === msg.payload?.messageId ? { ...m, seen: true } : m));
+      if (msg.type === 'chat_typing') setTyping(p => ({ ...p, [msg.payload?.sourceDevice || '']: Boolean(msg.payload?.isTyping) }));
+      if (msg.type === 'session_joined' && msg.payload?.chatHistory) {
+        setMessages(msg.payload.chatHistory.map((item: any) => ({
+          messageId: item.messageId || `c-${item.sentAt}`, text: item.text || '',
+          username: item.username || 'Unknown', sourceDevice: item.sourceDevice || '',
+          sentAt: item.sentAt || Date.now(), delivered: true, seen: false,
+          attachment: item.attachment,
+        })));
+        scrollToBottom();
+      }
+    };
+
+    const chatHandler = (e: Event) => {
+      const m = (e as CustomEvent).detail?.message;
+      if (m) handler({ data: JSON.stringify(m) } as MessageEvent);
+    };
+    ws.addEventListener('message', handler);
+    window.addEventListener('chatMessage', chatHandler);
+    return () => { ws.removeEventListener('message', handler); window.removeEventListener('chatMessage', chatHandler); };
+  }, [session, deviceId, scrollToBottom]);
+
+  useEffect(() => { scrollToBottom(); }, [messages.length]);
+
+  const sendMessage = async (attachmentFile?: File) => {
+    const text = input.trim();
+    if (!text && !attachmentFile) return;
+    if (!session) return;
+    const ws = (window as any).appWebSocket as WebSocket | null;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    let attachment: Attachment | undefined;
+    if (attachmentFile) {
+      const buf = await attachmentFile.arrayBuffer();
+      let bin = ''; const bytes = new Uint8Array(buf);
+      for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i]);
+      attachment = { name: attachmentFile.name, type: attachmentFile.type, size: attachmentFile.size, data: btoa(bin) };
+    }
+
+    if (editingId) {
+      // Edit: update locally and notify
+      setMessages(p => p.map(m => m.messageId === editingId ? { ...m, text, edited: true } : m));
+      setEditingId(null); setInput('');
+      ws.send(JSON.stringify({ type: 'chat_message', sessionId: session.id, deviceId, payload: { chat: { messageId: editingId, text, username, sentAt: Date.now(), format: 'plain', edited: true } }, timestamp: Date.now() }));
+      return;
+    }
+
+    const messageId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const sentAt = Date.now();
+    const newMsg: ChatMsg = { messageId, text, username, sourceDevice: deviceId, sentAt, delivered: false, seen: false, replyTo: replyTo?.messageId, attachment };
+    setMessages(p => [...p, newMsg]);
+    setInput(''); setReplyTo(null);
+    ws.send(JSON.stringify({ type: 'chat_message', sessionId: session.id, deviceId, payload: { chat: { messageId, text, username, sentAt, format: 'plain', replyTo: replyTo?.messageId, attachment } }, timestamp: Date.now() }));
+    scrollToBottom();
+  };
+
+  const handleInputChange = (val: string) => {
+    setInput(val);
+    if (!session) return;
+    const ws = (window as any).appWebSocket as WebSocket | null;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    ws.send(JSON.stringify({ type: 'chat_typing', sessionId: session.id, deviceId, payload: { isTyping: val.length > 0 }, timestamp: Date.now() }));
+    typingTimerRef.current = window.setTimeout(() => {
+      ws.send(JSON.stringify({ type: 'chat_typing', sessionId: session.id, deviceId, payload: { isTyping: false }, timestamp: Date.now() }));
+    }, 1500);
+  };
+
+  const handleContextMenu = (e: React.MouseEvent, msg: ChatMsg) => {
+    e.preventDefault();
+    setCtxMenu({ msgId: msg.messageId, x: e.clientX, y: e.clientY, own: msg.sourceDevice === deviceId });
+  };
+
+  const closeCtxMenu = () => setCtxMenu(null);
+
+  const ctxAction = (action: string) => {
+    const msg = messages.find(m => m.messageId === ctxMenu?.msgId);
+    if (!msg) { closeCtxMenu(); return; }
+    if (action === 'reply') { setReplyTo(msg); inputRef.current?.focus(); }
+    if (action === 'copy') navigator.clipboard.writeText(msg.text).catch(() => {});
+    if (action === 'edit' && msg.sourceDevice === deviceId) { setEditingId(msg.messageId); setInput(msg.text); inputRef.current?.focus(); }
+    if (action === 'delete' && msg.sourceDevice === deviceId) setMessages(p => p.filter(m => m.messageId !== msg.messageId));
+    closeCtxMenu();
+  };
+
+  const renderText = (text: string) => {
+    if (!text) return null;
+    // Code block
+    if (text.includes('```')) {
+      const parts = text.split(/(```[\s\S]*?```)/g);
+      return <>{parts.map((p, i) => p.startsWith('```') ? <pre key={i} className="msg-code">{p.replace(/```/g, '').trim()}</pre> : <span key={i}>{renderInline(p)}</span>)}</>;
+    }
+    return renderInline(text);
+  };
+
+  const renderInline = (text: string) => {
+    const urlRe = /(https?:\/\/[^\s]+)/g;
+    const parts = text.split(urlRe);
+    return <>{parts.map((p, i) => /^https?:\/\//.test(p) ? <a key={i} href={p} target="_blank" rel="noreferrer" className="msg-link">{p}</a> : <span key={i}>{p}</span>)}</>;
+  };
+
+  const renderAttachment = (att: Attachment, own: boolean) => {
+    if (att.type.startsWith('image/')) {
+      const src = `data:${att.type};base64,${att.data}`;
+      return <img src={src} alt={att.name} className="msg-img" onClick={() => window.open(src, '_blank')} />;
+    }
+    const downloadAtt = () => {
+      const bin = atob(att.data); const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const blob = new Blob([bytes.buffer], { type: att.type });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = att.name; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1200);
+    };
+    return (
+      <div className={`msg-file-att${own ? ' own' : ''}`} onClick={downloadAtt}>
+        <span className="msg-file-icon">📎</span>
+        <div className="msg-file-info">
+          <div className="msg-file-name">{att.name}</div>
+          <div className="msg-file-size">{Math.max(1, Math.round(att.size / 1024))} KB · tap to download</div>
+        </div>
+      </div>
+    );
+  };
+
+  const typingUsers = Object.entries(typing).filter(([, v]) => v).map(([k]) => k);
+  const replyMsg = replyTo ? messages.find(m => m.messageId === replyTo.messageId) : null;
+
+  return (
+    <div className="messages-page" onClick={closeCtxMenu}>
+      <div className="messages-container card">
+        <div className="msg-header">
+          <div className="msg-header-icon">💬</div>
+          <div>
+            <div className="msg-header-title">Session Chat</div>
+            <div className="msg-header-sub">{session ? `Session ${session.code} · ${messages.length} messages` : 'No active session'}</div>
+          </div>
+        </div>
+
+        <div className="msg-body" ref={bodyRef}>
+          {!session && <div className="msg-empty">Create or join a session to start chatting.</div>}
+          {session && messages.length === 0 && <div className="msg-empty">No messages yet. Say hi! 👋</div>}
+
+          {messages.map(m => {
+            const own = m.sourceDevice === deviceId;
+            const repliedMsg = m.replyTo ? messages.find(r => r.messageId === m.replyTo) : null;
+            return (
+              <div key={m.messageId} className={`msg-row${own ? ' own' : ''}`} onContextMenu={e => handleContextMenu(e, m)}>
+                {!own && <div className="msg-avatar">{(m.username || '?')[0].toUpperCase()}</div>}
+                <div className={`msg-bubble${own ? ' own' : ''}`}>
+                  {!own && <div className="msg-sender">{m.username}</div>}
+                  {repliedMsg && (
+                    <div className="msg-reply-preview">
+                      <span className="msg-reply-name">{repliedMsg.sourceDevice === deviceId ? 'You' : repliedMsg.username}</span>
+                      <span className="msg-reply-text">{repliedMsg.text.slice(0, 60)}</span>
+                    </div>
+                  )}
+                  {m.attachment && renderAttachment(m.attachment, own)}
+                  {m.text && <div className="msg-text">{renderText(m.text)}{m.edited && <span className="msg-edited"> (edited)</span>}</div>}
+                  <div className="msg-footer">
+                    <span className="msg-time">{new Date(m.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    {own && <span className={`msg-tick${m.seen ? ' seen' : m.delivered ? ' delivered' : ''}`}>{m.seen ? '✓✓' : m.delivered ? '✓✓' : '✓'}</span>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+
+          {typingUsers.length > 0 && (
+            <div className="msg-typing-row">
+              <div className="msg-typing-bubble">
+                <span className="typing-dots"><i /><i /><i /></span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Reply bar */}
+        {replyMsg && (
+          <div className="msg-reply-bar">
+            <div className="msg-reply-bar-content">
+              <span className="msg-reply-bar-name">{replyMsg.sourceDevice === deviceId ? 'You' : replyMsg.username}</span>
+              <span className="msg-reply-bar-text">{replyMsg.text.slice(0, 80)}</span>
+            </div>
+            <button className="msg-reply-bar-close" onClick={() => setReplyTo(null)}>✕</button>
+          </div>
+        )}
+
+        {/* Edit bar */}
+        {editingId && (
+          <div className="msg-edit-bar">
+            <span>✏️ Editing message</span>
+            <button onClick={() => { setEditingId(null); setInput(''); }}>Cancel</button>
+          </div>
+        )}
+
+        <div className="msg-input-row">
+          <button className="msg-attach-btn" title="Attach file" onClick={() => fileInputRef.current?.click()}>📎</button>
+          <input ref={fileInputRef} type="file" hidden onChange={e => { const f = e.target.files?.[0]; if (f) sendMessage(f); e.currentTarget.value = ''; }} />
+          <textarea
+            ref={inputRef}
+            className="msg-input"
+            value={input}
+            onChange={e => handleInputChange(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+            placeholder={session ? 'Type a message… (Enter to send, Shift+Enter for newline)' : 'Join a session to chat'}
+            disabled={!session}
+            rows={1}
+          />
+          <button className="btn-primary msg-send-btn" onClick={() => sendMessage()} disabled={!input.trim() || !session}>
+            🚀
+          </button>
+        </div>
+      </div>
+
+      {/* Context menu */}
+      {ctxMenu && (
+        <div className="msg-ctx-menu" style={{ top: ctxMenu.y, left: ctxMenu.x }} onClick={e => e.stopPropagation()}>
+          <button onClick={() => ctxAction('reply')}>↩ Reply</button>
+          <button onClick={() => ctxAction('copy')}>📋 Copy</button>
+          {ctxMenu.own && <button onClick={() => ctxAction('edit')}>✏️ Edit</button>}
+          {ctxMenu.own && <button className="danger" onClick={() => ctxAction('delete')}>🗑 Delete</button>}
+        </div>
+      )}
+    </div>
+  );
+}

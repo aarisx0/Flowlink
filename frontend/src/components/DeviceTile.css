@@ -1,9 +1,9 @@
 .device-tile {
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.92) 0%, rgba(238, 242, 255, 0.9) 100%);
-  border: 1px solid rgba(99, 102, 241, 0.32);
-  border-radius: 16px;
-  padding: 1.5rem;
-  transition: all 0.2s;
+  background: linear-gradient(145deg, rgba(255,255,255,0.94) 0%, rgba(238,242,255,0.92) 100%);
+  border: 1px solid rgba(99,102,241,0.28);
+  border-radius: 18px;
+  padding: 1.4rem;
+  transition: all 0.22s ease;
   cursor: pointer;
   position: relative;
   min-height: 180px;
@@ -12,20 +12,22 @@
   z-index: 10;
   pointer-events: auto !important;
   user-select: none;
-  box-shadow: 0 10px 30px rgba(30, 41, 59, 0.12);
+  box-shadow: 0 8px 24px rgba(30,41,59,0.10);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 .device-tile:hover {
-  border-color: rgba(79, 70, 229, 0.55);
-  box-shadow: 0 18px 35px rgba(30, 41, 59, 0.18);
-  transform: translateY(-2px);
+  border-color: rgba(79,70,229,0.5);
+  box-shadow: 0 16px 32px rgba(30,41,59,0.16);
+  transform: translateY(-3px);
 }
 
 .device-tile.drag-over {
-  border-color: #5563d6;
+  border-color: #6C63FF;
   background: linear-gradient(135deg, #e8eeff 0%, #dde5ff 100%);
-  box-shadow: 0 8px 24px rgba(102, 126, 234, 0.5);
-  transform: scale(1.03);
+  box-shadow: 0 8px 24px rgba(108,99,255,0.4);
+  transform: scale(1.02);
 }
 
 .device-tile.offline {
@@ -334,3 +336,25 @@
   font-weight: 500;
   opacity: 0.8;
 }
+
+/* Friend request button */
+.dt-friend-btn {
+  width: 30px; height: 30px; border-radius: 50%;
+  border: 2px solid #667eea; background: #fff;
+  color: #667eea; font-size: 1.1rem; font-weight: 800;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: all 0.2s; flex-shrink: 0; line-height: 1;
+}
+.dt-friend-btn:hover:not(:disabled) {
+  background: #667eea; color: #fff;
+  transform: scale(1.1);
+}
+.dt-friend-btn.pending {
+  border-color: #f59e0b; color: #f59e0b;
+  cursor: default; font-size: 0.75rem;
+}
+.dt-friend-btn.friend {
+  border-color: #16a34a; color: #16a34a;
+  cursor: default; font-size: 0.9rem;
+}
+.dt-friend-btn:disabled { opacity: 0.8; }

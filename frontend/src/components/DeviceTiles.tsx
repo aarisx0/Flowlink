@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+﻿import { useState, useEffect, useRef } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { QRCodeSVG } from 'qrcode.react';
 import { Session, Device, Intent, Group, FileTransferStatus } from '@shared/types';
@@ -1940,19 +1940,54 @@ export default function DeviceTiles({
 
   return (
     <div className="device-tiles-container">
+      {/* Header */}
       <div className="device-tiles-header">
-        <h2>Connected Devices</h2>
+        <div>
+          <h2>Connected Devices</h2>
+          <div style={{ fontSize: '0.78rem', color: '#B8B5D4', marginTop: '2px' }}>
+            Collaborate and connect seamlessly
+          </div>
+        </div>
         <div className="session-info">
-          <span>Session: {session.code}</span>
-          <button className="btn-invite" onClick={() => setShowInvitationPanel(true)}>
-            Invite Others
-          </button>
-          <button className="btn-leave" onClick={handleLeaveSession}>
-            Leave Session
+          <div className="session-code-badge">
+            <span>🔑</span>
+            <span>{session.code}</span>
+          </div>
+          <button className="btn-chat" style={{ background: 'rgba(108,99,255,0.15)', color: '#A78BFA', border: '1px solid rgba(108,99,255,0.3)' }} onClick={() => setShowInvitationPanel(true)}>
+            + Invite
           </button>
           <button className="btn-chat" onClick={() => setIsStudyOpen((prev) => !prev)}>
-            Study
+            📚 Study
           </button>
+          <button className="btn-chat" onClick={() => setIsChatOpen((prev) => !prev)} style={{ position: 'relative' }}>
+            💬 Chat
+            {chatUnreadCount > 0 && !isChatOpen && (
+              <span className="chat-unread-badge">{chatUnreadCount}</span>
+            )}
+          </button>
+          <button className="btn-leave" onClick={handleLeaveSession}>
+            Leave
+          </button>
+        </div>
+      </div>
+
+      {/* Stats row */}
+      <div className="session-stats">
+        <div className="stat-card">
+          <div className="stat-value" style={{ color: '#22C55E' }}>{Array.from(devices.values()).filter(d => d.online).length}</div>
+          <div className="stat-label">Online</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value" style={{ color: '#F59E0B' }}>{studyFiles.length}</div>
+          <div className="stat-label">Files</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value" style={{ color: '#3B82F6' }}>{chatMessages.length}</div>
+          <div className="stat-label">Messages</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value" style={{ color: '#A78BFA' }}>{groups.length}</div>
+          <div className="stat-label">Groups</div>
         </div>
       </div>
       {!isCollaboratedView && (

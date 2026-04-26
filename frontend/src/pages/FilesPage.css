@@ -1,0 +1,19 @@
+/* ===== Files Page ===== */
+.files-page { display: flex; flex-direction: column; gap: 1.25rem; animation: fadeInUp 0.3s ease; }
+.files-header { display: flex; align-items: center; justify-content: space-between; padding: 1.25rem 1.5rem; gap: 1rem; flex-wrap: wrap; }
+.fh-left { display: flex; align-items: center; gap: 1rem; }
+.fh-icon { font-size: 2rem; }
+.fh-title { font-size: 1rem; font-weight: 800; color: var(--text); }
+.fh-sub { font-size: 0.73rem; color: var(--text-3); margin-top: 2px; }
+.files-empty { display: flex; flex-direction: column; align-items: center; gap: 0.65rem; padding: 3.5rem 2rem; text-align: center; color: var(--text-3); font-size: 0.85rem; }
+.files-empty > div:first-child { font-size: 2.5rem; opacity: 0.4; }
+.files-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+.file-card { display: flex; flex-direction: column; gap: 0.85rem; padding: 1.25rem; transition: all 0.2s; }
+.file-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: var(--border-strong); }
+.fc-icon { font-size: 2.5rem; }
+.fc-info { flex: 1; }
+.fc-name { font-size: 0.9rem; font-weight: 700; color: var(--text); word-break: break-word; }
+.fc-meta { font-size: 0.7rem; color: var(--text-3); margin-top: 3px; }
+.fc-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.fc-btn { font-size: 0.75rem !important; padding: 0.38rem 0.7rem !important; }
+label.btn-primary.disabled { opacity: 0.55; cursor: not-allowed; pointer-events: none; }

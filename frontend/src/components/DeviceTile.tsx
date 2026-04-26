@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Device, FileTransferStatus, Intent } from '@shared/types';
 import MediaDetector from '../services/MediaDetector';
+import { friendService } from '../services/FriendService';
 import './DeviceTile.css';
 
 interface DeviceTileProps {
@@ -10,15 +11,46 @@ interface DeviceTileProps {
   onDragEnd: () => void;
   onDrop: (intent: Intent) => void;
   transferStatus?: FileTransferStatus | null;
+  myUsername?: string;
+  myDeviceId?: string;
+  sessionId?: string;
 }
 
 function DeviceTileComponent({
   device,
   transferStatus,
   onDrop,
+  myUsername = '',
+  myDeviceId = '',
+  sessionId,
 }: DeviceTileProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [clipboardText, setClipboardText] = useState('');
+  const [friendState, setFriendState] = useState<'none' | 'pending' | 'friend'>(() => {
+    const uname = device.username || device.name;
+    if (friendService.isFriend(uname)) return 'friend';
+    if (friendService.hasPendingSentRequest(uname)) return 'pending';
+    return 'none';
+  });
+
+  useEffect(() => {
+    const uname = device.username || device.name;
+    const refresh = () => {
+      if (friendService.isFriend(uname)) setFriendState('friend');
+      else if (friendService.hasPendingSentRequest(uname)) setFriendState('pending');
+      else setFriendState('none');
+    };
+    const unsub1 = friendService.on('friends_changed', refresh);
+    const unsub2 = friendService.on('sent_changed', refresh);
+    return () => { unsub1(); unsub2(); };
+  }, [device.username, device.name]);
+
+  const sendFriendRequest = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const uname = device.username || device.name;
+    friendService.sendFriendRequest(myUsername, myDeviceId, uname, sessionId);
+    setFriendState('pending');
+  };
 
   const formatBytes = (value: number): string => {
     if (value <= 0) return '0 B';
@@ -385,6 +417,17 @@ function DeviceTileComponent({
             </span>
           </div>
         </div>
+        {/* Friend request button */}
+        {myUsername && (device.username || device.name) !== myUsername && (
+          <button
+            className={`dt-friend-btn${friendState === 'friend' ? ' friend' : friendState === 'pending' ? ' pending' : ''}`}
+            onClick={friendState === 'none' ? sendFriendRequest : undefined}
+            title={friendState === 'friend' ? 'Already friends' : friendState === 'pending' ? 'Request sent' : 'Send friend request'}
+            disabled={friendState !== 'none'}
+          >
+            {friendState === 'friend' ? '✓' : friendState === 'pending' ? '⏳' : '+'}
+          </button>
+        )}
       </div>
 
       <div className="device-permissions">
