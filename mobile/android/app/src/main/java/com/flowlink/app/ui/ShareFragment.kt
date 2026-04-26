@@ -81,19 +81,19 @@ class ShareFragment : Fragment() {
             onBrowseFilesClick = { device -> triggerFilePicker(device.id) },
             onAddFriend = { device ->
                 val mainAct = activity as? MainActivity ?: return@DeviceTileAdapter
-                val username = mainAct.webSocketManager.sessionDevices.value
-                    .firstOrNull { it.id == device.id }?.name ?: device.name
-                // Save as pending_sent locally
+                // Get the actual username from DeviceInfo (not device name)
+                val deviceInfo = mainAct.webSocketManager.sessionDevices.value
+                    .firstOrNull { it.id == device.id }
+                val targetUsername = deviceInfo?.username?.ifEmpty { null } ?: deviceInfo?.name ?: device.name
                 val friend = com.flowlink.app.model.Friend(
-                    username = username,
+                    username = targetUsername,
                     deviceName = device.name,
                     deviceId = device.id,
                     status = "pending_sent"
                 )
                 FriendsFragment.savePendingSent(requireContext(), friend)
-                // Send request via WebSocket
-                mainAct.webSocketManager.sendFriendRequest(username)
-                android.widget.Toast.makeText(requireContext(), "Friend request sent to $username", android.widget.Toast.LENGTH_SHORT).show()
+                mainAct.webSocketManager.sendFriendRequest(targetUsername)
+                android.widget.Toast.makeText(requireContext(), "Friend request sent to $targetUsername", android.widget.Toast.LENGTH_SHORT).show()
             },
             transferStatuses = transferStatuses
         )

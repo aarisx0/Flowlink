@@ -238,19 +238,31 @@ wss.on('connection', (ws, req) => {
           const targetUsername = message.payload?.toUsername;
           const targetDeviceId = message.payload?.toDeviceId;
           let targetWs = null;
+
           if (targetDeviceId) {
             targetWs = deviceConnections.get(targetDeviceId);
           } else if (targetUsername) {
-            // Find device by username in global registry
-            for (const [, entry] of globalDevices.entries()) {
-              if (entry.device?.username === targetUsername) {
-                targetWs = deviceConnections.get(entry.device.id);
+            // Search global registry by username (case-insensitive)
+            for (const [devId, entry] of globalDevices.entries()) {
+              const storedUsername = entry.device?.username || '';
+              if (storedUsername.toLowerCase() === targetUsername.toLowerCase()) {
+                targetWs = deviceConnections.get(devId);
+                console.log(`Found target device for ${targetUsername}: ${devId.substring(0,8)}`);
                 break;
               }
             }
           }
+
           if (targetWs && targetWs.readyState === targetWs.OPEN) {
             targetWs.send(JSON.stringify({ ...message, timestamp: Date.now() }));
+            console.log(`Routed ${message.type} to ${targetUsername || targetDeviceId}`);
+          } else {
+            // Fallback: broadcast to all devices in current session
+            if (message.sessionId) {
+              broadcastToSession(message.sessionId, { ...message, timestamp: Date.now() }, message.deviceId);
+              console.log(`Fallback: broadcast ${message.type} to session ${message.sessionId}`);
+            }
+            console.warn(`Could not route ${message.type} to ${targetUsername} - device not found or offline`);
           }
           break;
         }

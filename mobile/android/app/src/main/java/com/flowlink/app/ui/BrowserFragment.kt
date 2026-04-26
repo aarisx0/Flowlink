@@ -66,6 +66,18 @@ class BrowserFragment : Fragment() {
             setSupportZoom(true)
         }
 
+        // WebView JS bridge for text selection sync
+        binding.webView.addJavascriptInterface(object : Any() {
+            @android.webkit.JavascriptInterface
+            fun onTextSelected(text: String) {
+                if (syncEnabled && text.isNotBlank()) {
+                    activity?.runOnUiThread {
+                        mainActivity.webSocketManager.sendBrowserSync("highlight", text.take(200))
+                    }
+                }
+            }
+        }, "FlowLinkBridge")
+
         binding.webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 return false
@@ -82,8 +94,21 @@ class BrowserFragment : Fragment() {
                 // Only sync URL when the page fully loads AND it's a new URL
                 if (syncEnabled && url != lastSyncedUrl && url.startsWith("http")) {
                     lastSyncedUrl = url
-                    suppressIncoming(3000)   // suppress incoming for 3s after we navigate
+                    suppressIncoming(3000)
                     mainActivity.webSocketManager.sendBrowserSync("url", url)
+                }
+                // Inject selection listener so text selection fires sync
+                if (syncEnabled) {
+                    view.evaluateJavascript("""
+                        (function(){
+                            document.addEventListener('selectionchange',function(){
+                                var t=window.getSelection().toString().trim();
+                                if(t.length>1&&t.length<300){
+                                    window.FlowLinkBridge&&window.FlowLinkBridge.onTextSelected(t);
+                                }
+                            });
+                        })();
+                    """.trimIndent(), null)
                 }
             }
         }

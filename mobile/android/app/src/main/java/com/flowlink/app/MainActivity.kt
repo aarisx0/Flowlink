@@ -196,6 +196,47 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
         // Start clipboard sync service
         startClipboardSyncService()
 
+        // Collect ALL incoming chat messages at app level so they persist
+        // regardless of whether ChatFragment is currently visible
+        lifecycleScope.launch {
+            webSocketManager.chatEvents.collect { event ->
+                if (event is WebSocketManager.ChatEvent.Message) {
+                    val selfId = sessionManager.getDeviceId()
+                    // Avoid duplicates (ChatFragment may also add the same message)
+                    if (chatMessages.none { it.messageId == event.messageId }) {
+                        chatMessages.add(
+                            com.flowlink.app.model.ChatMessage(
+                                messageId = event.messageId,
+                                text = event.text,
+                                username = event.username,
+                                sourceDevice = event.sourceDevice,
+                                targetDevice = event.targetDevice,
+                                sentAt = event.sentAt,
+                                delivered = true,
+                                seen = false,
+                                fileId = event.fileId,
+                                fileName = event.fileName,
+                                fileType = event.fileType,
+                                fileSize = event.fileSize,
+                                fileData = event.fileData,
+                                replyToId = event.replyToId,
+                                replyToText = event.replyToText,
+                                replyToUsername = event.replyToUsername
+                            )
+                        )
+                    }
+                }
+                if (event is WebSocketManager.ChatEvent.Delivered) {
+                    val idx = chatMessages.indexOfFirst { it.messageId == event.messageId }
+                    if (idx >= 0) chatMessages[idx] = chatMessages[idx].copy(delivered = true)
+                }
+                if (event is WebSocketManager.ChatEvent.Seen) {
+                    val idx = chatMessages.indexOfFirst { it.messageId == event.messageId }
+                    if (idx >= 0) chatMessages[idx] = chatMessages[idx].copy(delivered = true, seen = true)
+                }
+            }
+        }
+
         // React to intents received from backend (e.g., links, media, clipboard, files)
         lifecycleScope.launch {
             webSocketManager.receivedIntents.collectLatest { remoteIntent: FlowIntent? ->
@@ -236,11 +277,9 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
                     runOnUiThread {
                         Toast.makeText(this@MainActivity, "Session ended", Toast.LENGTH_SHORT).show()
                         binding.bottomNav.visibility = View.GONE
-                        // Clear back stack and show session manager
-                        supportFragmentManager.popBackStack(null, androidx.fragment.app.FragmentManager.POP_BACK_STACK_INCLUSIVE)
                         supportFragmentManager.beginTransaction()
                             .replace(R.id.fragment_container, SessionManagerFragment())
-                            .commit()
+                            .commitAllowingStateLoss()
                     }
                 }
             }
@@ -505,7 +544,9 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
     }
 
     fun leaveSession() {
-        lifecycleScope.launch {
+        // Run everything on Main to avoid IllegalStateException from fragment transactions
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+            // Send leave message (best-effort)
             val sessionId = sessionManager.getCurrentSessionId()
             if (sessionId != null) {
                 try {
@@ -517,22 +558,23 @@ class MainActivity : AppCompatActivity(), UsernameDialogFragment.UsernameDialogL
                     }.toString())
                 } catch (_: Exception) {}
             }
-            webSocketManager.disconnect()
-            sessionManager.setSessionActive(false)
-            sessionManager.leaveSession()
+
+            // Disconnect and clear state
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try { webSocketManager.disconnect() } catch (_: Exception) {}
+            }
+            try { sessionManager.setSessionActive(false) } catch (_: Exception) {}
+            try { sessionManager.leaveSession() } catch (_: Exception) {}
             chatMessages.clear()
-            runOnUiThread {
-                try {
-                    binding.bottomNav.visibility = View.GONE
-                    // Clear entire back stack safely
-                    val fm = supportFragmentManager
-                    repeat(fm.backStackEntryCount) { fm.popBackStackImmediate() }
-                    fm.beginTransaction()
-                        .replace(R.id.fragment_container, SessionManagerFragment())
-                        .commitAllowingStateLoss()
-                } catch (e: Exception) {
-                    android.util.Log.e("FlowLink", "Error navigating after leave", e)
-                }
+
+            // Navigate back — single safe transaction, no popBackStack
+            try {
+                binding.bottomNav.visibility = View.GONE
+                supportFragmentManager.beginTransaction()
+                    .replace(R.id.fragment_container, SessionManagerFragment())
+                    .commitAllowingStateLoss()
+            } catch (e: Exception) {
+                android.util.Log.e("FlowLink", "Error navigating after leave: ${e.message}", e)
             }
         }
     }

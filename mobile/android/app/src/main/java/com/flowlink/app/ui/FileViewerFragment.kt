@@ -1,5 +1,6 @@
 package com.flowlink.app.ui
 
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -12,8 +13,9 @@ import android.util.Base64
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.JavascriptInterface
+import android.webkit.WebView
 import android.widget.ImageView
-import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.core.content.FileProvider
 import androidx.fragment.app.Fragment
@@ -39,8 +41,11 @@ class FileViewerFragment : Fragment() {
     private var currentPage = 1
     private var totalPages = 1
     private var isHost = false
+    private var syncEnabled = true
     private var pdfRenderer: PdfRenderer? = null
     private var pdfFile: File? = null
+    private var scrollSyncTimer: Runnable? = null
+    private var suppressScrollSync = false
 
     companion object {
         fun newInstance(file: WebSocketManager.StudyFile, isHost: Boolean): FileViewerFragment {
@@ -70,6 +75,7 @@ class FileViewerFragment : Fragment() {
         return binding.root
     }
 
+    @SuppressLint("SetJavaScriptEnabled")
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         val mainActivity = activity as? MainActivity ?: return
@@ -78,30 +84,58 @@ class FileViewerFragment : Fragment() {
         binding.btnBack.setOnClickListener { parentFragmentManager.popBackStack() }
         binding.btnDownload.setOnClickListener { downloadFile() }
 
+        // Sync toggle
+        updateSyncToggleUI()
+        binding.btnHighlight.setOnClickListener {
+            // Repurpose highlight button as sync toggle
+            syncEnabled = !syncEnabled
+            updateSyncToggleUI()
+            Toast.makeText(requireContext(),
+                if (syncEnabled) "Sync ON" else "Sync OFF",
+                Toast.LENGTH_SHORT).show()
+        }
+
+        // Page controls
         binding.btnPrevPage.setOnClickListener {
             if (currentPage > 1) {
                 currentPage--
                 renderCurrentPage()
-                if (isHost) mainActivity.webSocketManager.sendStudySync("page", currentPage)
+                if (isHost && syncEnabled) mainActivity.webSocketManager.sendStudySync("page", currentPage)
             }
         }
         binding.btnNextPage.setOnClickListener {
             if (currentPage < totalPages) {
                 currentPage++
                 renderCurrentPage()
-                if (isHost) mainActivity.webSocketManager.sendStudySync("page", currentPage)
+                if (isHost && syncEnabled) mainActivity.webSocketManager.sendStudySync("page", currentPage)
             }
         }
 
-        binding.btnHighlight.setOnClickListener {
-            val text = binding.tvContent.text?.toString()?.take(100) ?: ""
-            if (text.isNotEmpty() && isHost) {
-                mainActivity.webSocketManager.sendStudySync("highlight", text)
-                Toast.makeText(requireContext(), "Highlight synced", Toast.LENGTH_SHORT).show()
+        // Debounced scroll sync — only fire 400ms after user stops scrolling
+        binding.scrollContent.viewTreeObserver.addOnScrollChangedListener {
+            if (!isHost || !syncEnabled || suppressScrollSync) return@addOnScrollChangedListener
+            scrollSyncTimer?.let { binding.root.removeCallbacks(it) }
+            val r = Runnable {
+                mainActivity.webSocketManager.sendStudySync("scroll_px", binding.scrollContent.scrollY)
             }
+            scrollSyncTimer = r
+            binding.root.postDelayed(r, 400)
         }
 
-        // Observe sync events
+        // WebView JS bridge for text selection sync
+        binding.wvContent.settings.javaScriptEnabled = true
+        binding.wvContent.addJavascriptInterface(object : Any() {
+            @JavascriptInterface
+            fun onTextSelected(text: String) {
+                if (isHost && syncEnabled && text.isNotBlank()) {
+                    activity?.runOnUiThread {
+                        mainActivity.webSocketManager.sendStudySync("highlight", text.take(200))
+                    }
+                }
+            }
+        }, "FlowLinkBridge")
+
+        // Observe sync events from other devices
         viewLifecycleOwner.lifecycleScope.launch {
             mainActivity.webSocketManager.studySyncEvents.collect { event ->
                 when (event.mode) {
@@ -116,31 +150,61 @@ class FileViewerFragment : Fragment() {
                     }
                     "scroll_px" -> {
                         val px = (event.value as? Number)?.toInt() ?: 0
+                        suppressScrollSync = true
                         binding.scrollContent.smoothScrollTo(0, px)
+                        binding.root.postDelayed({ suppressScrollSync = false }, 600)
                     }
                     "highlight" -> {
-                        binding.tvHighlightInfo.text = "Highlighted: \"${event.value?.toString()?.take(40)}\""
+                        val text = event.value?.toString() ?: ""
+                        binding.tvHighlightInfo.text = "📌 \"${text.take(50)}\""
+                        // Highlight in WebView if visible
+                        if (binding.wvContent.visibility == View.VISIBLE) {
+                            highlightTextInWebView(text)
+                        }
                     }
                 }
             }
         }
 
-        // Sync scroll (host only)
-        if (isHost) {
-            binding.scrollContent.viewTreeObserver.addOnScrollChangedListener {
-                mainActivity.webSocketManager.sendStudySync("scroll_px", binding.scrollContent.scrollY)
-            }
-        }
+        // Notify others this file is open (host only)
+        if (isHost && syncEnabled) mainActivity.webSocketManager.sendStudySync("open_pdf", fileId)
 
-        // Notify others this file is open
-        if (isHost) mainActivity.webSocketManager.sendStudySync("open_pdf", fileId)
-
-        // Render content
         viewLifecycleOwner.lifecycleScope.launch { renderContent() }
     }
 
+    private fun updateSyncToggleUI() {
+        val color = if (syncEnabled) "#22C55E" else "#6B6890"
+        binding.btnHighlight.setBackgroundColor(android.graphics.Color.parseColor(
+            if (syncEnabled) "#1A22C55E" else "#1A6B6890"
+        ))
+        binding.tvHighlightInfo.text = if (syncEnabled) "● Syncing with session" else "○ Sync OFF"
+        binding.tvHighlightInfo.setTextColor(android.graphics.Color.parseColor(color))
+    }
+
+    private fun highlightTextInWebView(text: String) {
+        val escaped = text.replace("\\", "\\\\").replace("'", "\\'")
+        binding.wvContent.evaluateJavascript("""
+            (function(){
+                var body=document.body,txt='$escaped';
+                var walker=document.createTreeWalker(body,NodeFilter.SHOW_TEXT);
+                while(walker.nextNode()){
+                    var idx=walker.currentNode.textContent.indexOf(txt);
+                    if(idx>=0){
+                        var r=document.createRange();
+                        r.setStart(walker.currentNode,idx);
+                        r.setEnd(walker.currentNode,idx+txt.length);
+                        window.getSelection().removeAllRanges();
+                        window.getSelection().addRange(r);
+                        walker.currentNode.parentElement.scrollIntoView({behavior:'smooth',block:'center'});
+                        break;
+                    }
+                }
+            })();
+        """.trimIndent(), null)
+    }
+
     private suspend fun renderContent() {
-        if (fileData.isEmpty()) { showUnsupported(); return }
+        if (fileData.isEmpty()) { withContext(Dispatchers.Main) { showUnsupported() }; return }
         try {
             val bytes = Base64.decode(fileData, Base64.DEFAULT)
             when {
@@ -159,9 +223,7 @@ class FileViewerFragment : Fragment() {
                     binding.wvContent.visibility = View.GONE
                     binding.llUnsupported.visibility = View.GONE
                 }
-                fileType == "application/pdf" || fileName.endsWith(".pdf", true) -> {
-                    renderPdf(bytes)
-                }
+                fileType == "application/pdf" || fileName.endsWith(".pdf", true) -> renderPdf(bytes)
                 else -> withContext(Dispatchers.Main) { showUnsupported() }
             }
         } catch (e: Exception) {
@@ -172,20 +234,17 @@ class FileViewerFragment : Fragment() {
     private suspend fun renderPdf(bytes: ByteArray) {
         withContext(Dispatchers.IO) {
             try {
-                // Write bytes to temp file
                 val tmpFile = File(requireContext().cacheDir, "viewer_${System.currentTimeMillis()}.pdf")
                 tmpFile.writeBytes(bytes)
                 pdfFile = tmpFile
-
                 val pfd = ParcelFileDescriptor.open(tmpFile, ParcelFileDescriptor.MODE_READ_ONLY)
                 val renderer = PdfRenderer(pfd)
                 pdfRenderer = renderer
                 totalPages = renderer.pageCount
-
                 withContext(Dispatchers.Main) {
                     binding.wvContent.visibility = View.GONE
                     binding.tvContent.visibility = View.GONE
-                    binding.ivContent.visibility = View.GONE
+                    binding.ivContent.visibility = View.VISIBLE
                     binding.llUnsupported.visibility = View.GONE
                     updatePageInfo()
                     renderCurrentPage()
@@ -201,7 +260,6 @@ class FileViewerFragment : Fragment() {
         updatePageInfo()
         try {
             val page = renderer.openPage(currentPage - 1)
-            // Render at 2x density for sharpness
             val scale = resources.displayMetrics.density * 2f
             val width = (page.width * scale).toInt()
             val height = (page.height * scale).toInt()
@@ -210,14 +268,11 @@ class FileViewerFragment : Fragment() {
             canvas.drawColor(Color.WHITE)
             page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
             page.close()
-
-            // Show in a full-width ImageView inside the scroll container
             binding.ivContent.setImageBitmap(bitmap)
-            binding.ivContent.visibility = View.VISIBLE
             binding.ivContent.scaleType = ImageView.ScaleType.FIT_CENTER
             binding.ivContent.adjustViewBounds = true
         } catch (e: Exception) {
-            Toast.makeText(requireContext(), "Failed to render page: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(requireContext(), "Failed to render page", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -255,9 +310,9 @@ class FileViewerFragment : Fragment() {
     }
 
     override fun onDestroyView() {
-        super.onDestroyView()
         pdfRenderer?.close()
         pdfFile?.delete()
+        super.onDestroyView()
         _binding = null
     }
 }

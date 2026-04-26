@@ -53,6 +53,39 @@ class HomeFragment : Fragment() {
         val code = sessionManager?.getCurrentSessionCode()
         binding.tvSessionCode.text = code ?: "------"
 
+        // Reconnect button
+        binding.btnReconnect.setOnClickListener {
+            val sessionCode = sessionManager?.getCurrentSessionCode() ?: return@setOnClickListener
+            binding.tvStatusBadge.text = "⏳ Reconnecting…"
+            binding.tvStatusBadge.setTextColor(android.graphics.Color.parseColor("#F59E0B"))
+            binding.btnReconnect.visibility = View.GONE
+            mainActivity.webSocketManager.connect(sessionCode)
+        }
+
+        // Observe connection state to show/hide reconnect button
+        viewLifecycleOwner.lifecycleScope.launch {
+            mainActivity.webSocketManager.connectionState.collect { state ->
+                when (state) {
+                    is com.flowlink.app.service.WebSocketManager.ConnectionState.Connected -> {
+                        binding.tvStatusBadge.text = "● Connected"
+                        binding.tvStatusBadge.setTextColor(android.graphics.Color.parseColor("#22C55E"))
+                        binding.btnReconnect.visibility = View.GONE
+                    }
+                    is com.flowlink.app.service.WebSocketManager.ConnectionState.Disconnected,
+                    is com.flowlink.app.service.WebSocketManager.ConnectionState.Error -> {
+                        binding.tvStatusBadge.text = "● Disconnected"
+                        binding.tvStatusBadge.setTextColor(android.graphics.Color.parseColor("#EF4444"))
+                        binding.btnReconnect.visibility = View.VISIBLE
+                    }
+                    is com.flowlink.app.service.WebSocketManager.ConnectionState.Connecting -> {
+                        binding.tvStatusBadge.text = "⏳ Connecting…"
+                        binding.tvStatusBadge.setTextColor(android.graphics.Color.parseColor("#F59E0B"))
+                        binding.btnReconnect.visibility = View.GONE
+                    }
+                }
+            }
+        }
+
         // Hamburger drawer
         binding.btnHamburger.setOnClickListener { toggleDrawer() }
         binding.drawerOverlay.setOnClickListener { closeDrawer() }

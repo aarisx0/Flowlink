@@ -136,7 +136,8 @@ class WebSocketManager(private val mainActivity: MainActivity) {
         return DeviceInfo(
             id = deviceJson.optString("id", ""),
             name = deviceJson.optString("name", deviceJson.optString("deviceName", "Unknown Device")),
-            type = deviceJson.optString("type", deviceJson.optString("deviceType", "device"))
+            type = deviceJson.optString("type", deviceJson.optString("deviceType", "device")),
+            username = deviceJson.optString("username", "")
         )
     }
 
@@ -170,7 +171,8 @@ class WebSocketManager(private val mainActivity: MainActivity) {
     data class DeviceInfo(
         val id: String,
         val name: String,
-        val type: String
+        val type: String,
+        val username: String = ""
     )
 
     private val WS_URL = BackendConfig.WS_URL
@@ -1355,30 +1357,62 @@ class WebSocketManager(private val mainActivity: MainActivity) {
                 }
                 "friend_request" -> {
                     val payload = json.optJSONObject("payload") ?: return
+                    val fromUsername = payload.optString("fromUsername", "Someone")
+                    val fromDeviceId = json.optString("deviceId", "")
+                    val fromDeviceName = payload.optString("fromDeviceName", "")
+                    // Add to persistent inbox so it survives fragment recreation
+                    com.flowlink.app.ui.InboxFragment.addItem(mainActivity, com.flowlink.app.ui.InboxItem(
+                        id = "fr-${System.currentTimeMillis()}",
+                        type = "friend_request",
+                        title = "Friend Request",
+                        body = "$fromUsername wants to be your friend",
+                        fromUsername = fromUsername,
+                        fromDeviceId = fromDeviceId,
+                        fromDeviceName = fromDeviceName
+                    ))
                     _friendRequestEvents.tryEmit(FriendRequestEvent(
                         type = "received",
-                        fromUsername = payload.optString("fromUsername"),
-                        fromDeviceId = json.optString("deviceId"),
-                        fromDeviceName = payload.optString("fromDeviceName"),
+                        fromUsername = fromUsername,
+                        fromDeviceId = fromDeviceId,
+                        fromDeviceName = fromDeviceName,
                         accepted = false
                     ))
                     mainActivity.notificationService.showNotification(
                         "Friend Request",
-                        "${payload.optString("fromUsername")} wants to be your friend"
+                        "$fromUsername wants to be your friend"
                     )
                 }
                 "friend_request_response" -> {
                     val payload = json.optJSONObject("payload") ?: return
                     val accepted = payload.optBoolean("accepted", false)
+                    val fromUsername = payload.optString("fromUsername", "")
+                    val fromDeviceId = json.optString("deviceId", "")
+                    val fromDeviceName = payload.optString("fromDeviceName", "")
+
+                    // Persist immediately — don't rely on FriendsFragment being open
+                    if (accepted) {
+                        com.flowlink.app.ui.FriendsFragment.saveFriend(
+                            mainActivity,
+                            com.flowlink.app.model.Friend(
+                                username = fromUsername,
+                                deviceName = fromDeviceName,
+                                deviceId = fromDeviceId,
+                                status = "accepted"
+                            )
+                        )
+                    } else {
+                        com.flowlink.app.ui.FriendsFragment.removeFriend(mainActivity, fromDeviceId)
+                    }
+
                     _friendRequestEvents.tryEmit(FriendRequestEvent(
                         type = if (accepted) "accepted" else "rejected",
-                        fromUsername = payload.optString("fromUsername"),
-                        fromDeviceId = json.optString("deviceId"),
-                        fromDeviceName = payload.optString("fromDeviceName"),
+                        fromUsername = fromUsername,
+                        fromDeviceId = fromDeviceId,
+                        fromDeviceName = fromDeviceName,
                         accepted = accepted
                     ))
-                    val msg = if (accepted) "${payload.optString("fromUsername")} accepted your friend request!"
-                              else "${payload.optString("fromUsername")} declined your friend request"
+                    val msg = if (accepted) "$fromUsername accepted your friend request!"
+                              else "$fromUsername declined your friend request"
                     mainActivity.notificationService.showNotification("Friend Request", msg)
                 }
                 "error" -> {

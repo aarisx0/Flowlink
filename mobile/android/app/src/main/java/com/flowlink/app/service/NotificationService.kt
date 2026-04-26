@@ -24,6 +24,7 @@ class NotificationService(private val context: Context) {
         const val CHANNEL_ID_GENERAL = "general"
         const val CHANNEL_ID_MEDIA = "media_handoff"
         const val CHANNEL_ID_TRANSFERS = "file_transfers"
+        const val CHANNEL_ID_SOS = "sos_alerts"
         
         const val NOTIFICATION_ID_INVITATION = 1001
         const val NOTIFICATION_ID_NEARBY = 1002
@@ -90,6 +91,23 @@ class NotificationService(private val context: Context) {
                     NotificationManager.IMPORTANCE_DEFAULT
                 ).apply {
                     description = "General FlowLink notifications"
+                },
+                NotificationChannel(
+                    CHANNEL_ID_SOS,
+                    "SOS Alerts",
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "Emergency SOS alerts from friends"
+                    setSound(
+                        android.provider.Settings.System.DEFAULT_ALARM_ALERT_URI,
+                        android.media.AudioAttributes.Builder()
+                            .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build()
+                    )
+                    enableVibration(true)
+                    vibrationPattern = longArrayOf(0, 200, 100, 200, 100, 200, 100, 600, 100, 600, 100, 600, 100, 200, 100, 200, 100, 200)
+                    lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
                 }
             )
             
@@ -400,26 +418,75 @@ class NotificationService(private val context: Context) {
     }
 
     /**
-     * Show SOS alert notification with sound and map link
+     * Show SOS alert notification with dedicated alarm sound + immediate tone
      */
     fun showSosAlert(username: String, mapsUrl: String) {
         createNotificationChannels()
+
+        // Play SOS tone immediately via ToneGenerator (works even if notification is delayed)
+        try {
+            val toneGen = android.media.ToneGenerator(android.media.AudioManager.STREAM_ALARM, 100)
+            // SOS pattern: 3 short, 3 long, 3 short
+            val handler = android.os.Handler(android.os.Looper.getMainLooper())
+            val sosTones = listOf(
+                Pair(android.media.ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 200L),
+                Pair(android.media.ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 200L),
+                Pair(android.media.ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 200L),
+                Pair(android.media.ToneGenerator.TONE_CDMA_EMERGENCY_RINGBACK, 600L),
+                Pair(android.media.ToneGenerator.TONE_CDMA_EMERGENCY_RINGBACK, 600L),
+                Pair(android.media.ToneGenerator.TONE_CDMA_EMERGENCY_RINGBACK, 600L),
+                Pair(android.media.ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 200L),
+                Pair(android.media.ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 200L),
+                Pair(android.media.ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 200L)
+            )
+            var delay = 0L
+            sosTones.forEach { (tone, duration) ->
+                handler.postDelayed({
+                    try { toneGen.startTone(tone, duration.toInt()) } catch (_: Exception) {}
+                }, delay)
+                delay += duration + 100L
+            }
+            handler.postDelayed({ toneGen.release() }, delay + 200L)
+        } catch (_: Exception) {}
+
+        // Also vibrate in SOS pattern
+        try {
+            val vibrator = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                val vm = context.getSystemService(android.content.Context.VIBRATOR_MANAGER_SERVICE) as android.os.VibratorManager
+                vm.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                context.getSystemService(android.content.Context.VIBRATOR_SERVICE) as android.os.Vibrator
+            }
+            // SOS: ... --- ...  (short short short, long long long, short short short)
+            val pattern = longArrayOf(0, 200, 100, 200, 100, 200, 100, 600, 100, 600, 100, 600, 100, 200, 100, 200, 100, 200)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                vibrator.vibrate(android.os.VibrationEffect.createWaveform(pattern, -1))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(pattern, -1)
+            }
+        } catch (_: Exception) {}
+
+        // Show notification with alarm sound
         val mapIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(mapsUrl))
         val pendingIntent = PendingIntent.getActivity(
             context, 9999, mapIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID_GENERAL)
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID_SOS)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
-            .setContentTitle("🆘 SOS Alert!")
+            .setContentTitle("🆘 SOS ALERT!")
             .setContentText("$username needs help! Tap to open location.")
-            .setStyle(NotificationCompat.BigTextStyle().bigText("$username has sent an SOS alert!\nTap to view their location on Google Maps."))
+            .setStyle(NotificationCompat.BigTextStyle()
+                .bigText("🆘 $username has sent an SOS alert!\n\nTap to view their location on Google Maps."))
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
-            .setVibrate(longArrayOf(0, 500, 200, 500, 200, 500))
-            .setSound(android.provider.Settings.System.DEFAULT_ALARM_ALERT_URI)
+            .setColor(android.graphics.Color.RED)
+            .setColorized(true)
+            .setOngoing(false)
             .build()
         try {
             notificationManager.notify(9999, notification)

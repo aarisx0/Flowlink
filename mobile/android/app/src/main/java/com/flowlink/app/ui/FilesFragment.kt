@@ -32,6 +32,7 @@ class FilesFragment : Fragment() {
     private var studyFiles = listOf<WebSocketManager.StudyFile>()
     private var filesAdapter: StudyFilesAdapter? = null
     private var isHost = false
+    private var syncEnabled = true   // sync toggle state
 
     private val pickFileLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri ?: return@registerForActivityResult
@@ -83,8 +84,7 @@ class FilesFragment : Fragment() {
             files = mutableListOf(),
             isHost = isHost,
             onOpen = { file ->
-                // Host opens file → broadcasts open_pdf to all, then opens viewer
-                if (isHost) mainActivity.webSocketManager.sendStudySync("open_pdf", file.id)
+                if (isHost && syncEnabled) mainActivity.webSocketManager.sendStudySync("open_pdf", file.id)
                 openFileViewer(file, mainActivity)
             },
             onDownload = { file -> downloadFile(file) },
@@ -97,15 +97,24 @@ class FilesFragment : Fragment() {
 
         binding.btnSelectFiles.setOnClickListener { pickFileLauncher.launch(arrayOf("*/*")) }
 
+        // Sync toggle
+        updateSyncToggleUI()
+        binding.btnSyncToggle.setOnClickListener {
+            syncEnabled = !syncEnabled
+            updateSyncToggleUI()
+            val msg = if (syncEnabled) "Sync ON — page/scroll synced with all" else "Sync OFF — viewing privately"
+            Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
+        }
+
         binding.btnStudyPrev.setOnClickListener {
             studyPage = maxOf(1, studyPage - 1)
             updateStudyStatus()
-            mainActivity.webSocketManager.sendStudySync("page", studyPage)
+            if (syncEnabled) mainActivity.webSocketManager.sendStudySync("page", studyPage)
         }
         binding.btnStudyNext.setOnClickListener {
             studyPage += 1
             updateStudyStatus()
-            mainActivity.webSocketManager.sendStudySync("page", studyPage)
+            if (syncEnabled) mainActivity.webSocketManager.sendStudySync("page", studyPage)
         }
 
         viewLifecycleOwner.lifecycleScope.launch {
@@ -177,7 +186,13 @@ class FilesFragment : Fragment() {
 
     private fun updateStudyStatus() {
         binding.tvStudyStatus.text = "Page $studyPage"
-        binding.tvSyncInfo.text = "Synced with all devices"
+        binding.tvSyncInfo.text = if (syncEnabled) "Synced with all devices" else "Sync OFF"
+    }
+
+    private fun updateSyncToggleUI() {
+        binding.btnSyncToggle.setColorFilter(
+            android.graphics.Color.parseColor(if (syncEnabled) "#22C55E" else "#6B6890")
+        )
     }
 
     override fun onDestroyView() {

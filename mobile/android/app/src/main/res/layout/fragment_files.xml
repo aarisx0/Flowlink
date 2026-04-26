@@ -38,6 +38,18 @@
                 android:textSize="12sp" />
         </LinearLayout>
 
+        <!-- Sync toggle -->
+        <ImageButton
+            android:id="@+id/btn_sync_toggle"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="@drawable/glass_card_bg_dark"
+            android:src="@android:drawable/ic_menu_share"
+            android:tint="#22C55E"
+            android:padding="6dp"
+            android:contentDescription="Sync toggle"
+            android:layout_marginEnd="8dp" />
+
         <Button
             android:id="@+id/btn_select_files"
             android:layout_width="wrap_content"

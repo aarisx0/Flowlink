@@ -180,7 +180,7 @@
         </LinearLayout>
     </ScrollView>
 
-    <!-- Highlight bar -->
+    <!-- Highlight bar (repurposed as sync toggle + status) -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -195,15 +195,15 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Select text to highlight for all"
-            android:textColor="#6B6890"
+            android:text="● Syncing with session"
+            android:textColor="#22C55E"
             android:textSize="12sp" />
 
         <Button
             android:id="@+id/btn_highlight"
             android:layout_width="wrap_content"
             android:layout_height="32dp"
-            android:text="Highlight"
+            android:text="Sync ON"
             android:textAllCaps="false"
             android:textColor="#FFFFFF"
             android:textSize="12sp"
